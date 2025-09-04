@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['bricks']
+
+roboflow:
+  workspace: palletsfinder
+  project: track_load_volume_estimator-mvn2r
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/palletsfinder/track_load_volume_estimator-mvn2r/dataset/1
