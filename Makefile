@@ -13,7 +13,7 @@ TEST_IMAGE ?= ./datasets/building_materials/test/images/image_0058_jpg.rf.1b776f
 
 MODEL_NAME = yolo11${MODEL_SIZE}-seg
 
-DEVICE = CPU
+DEVICE = CUDA
 
 #----------------------------------------------------------------------------------------------------------------------
 # Docker Settings
