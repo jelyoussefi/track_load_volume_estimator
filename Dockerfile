@@ -15,7 +15,6 @@ RUN apt-get update && apt-get install -y \
     curl \
     vim \
     unzip \
-    libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
@@ -27,10 +26,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip
-RUN pip install --upgrade pip
+RUN apt-get update && apt-get install -y python3-pip
+#RUN pip install --break-system-packages --upgrade pip 
 
 # Install Python dependencies
-RUN pip install \
+RUN pip install --break-system-packages \
     ultralytics \
     opencv-python-headless \
     pillow \
@@ -50,5 +50,8 @@ RUN pip install \
     ipywidgets
 
 # Install additional PyTorch vision packages
-RUN pip install torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+RUN pip install  --break-system-packages \
+	torchvision torchaudio --index-url https://download.pytorch.org/whl/cu129
 
+RUN pip install  --break-system-packages \
+    openvino-dev
