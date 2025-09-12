@@ -55,3 +55,5 @@ RUN pip install  --break-system-packages \
 
 RUN pip install  --break-system-packages \
     openvino-dev
+RUN pip install  --break-system-packages \
+    flask

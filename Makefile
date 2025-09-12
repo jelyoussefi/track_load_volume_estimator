@@ -7,13 +7,13 @@ CURRENT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 TASK ?= segment
 MODEL_SIZE ?= n
 IMAGE_SIZE ?= 640
-BATCH_SIZE ?= 2 
-EPOCHS ?= 50
+BATCH_SIZE ?= 16
+EPOCHS ?= 20
 TEST_IMAGE ?= ./datasets/building_materials/test/images/image_0058_jpg.rf.1b776fae09f8c75d003413923a30af00.jpg
 
 MODEL_NAME = yolo11${MODEL_SIZE}-seg
 
-DEVICE = CUDA
+DEVICE = CPU
 
 #----------------------------------------------------------------------------------------------------------------------
 # Docker Settings
@@ -24,7 +24,6 @@ export DOCKER_BUILDKIT=1
 DOCKER_RUN_PARAMS= \
 	-it --rm -a stdout -a stderr  \
 	-v ${CURRENT_DIR}:/workspace \
-	-p 6006:6006 \
 	-v /tmp/.X11-unix:/tmp/.X11-unix  -v ${HOME}/.Xauthority:/home/root/.Xauthority 
 	
 ifeq ($(DEVICE),CUDA)
@@ -38,8 +37,8 @@ DOCKER_RUN_PARAMS := ${DOCKER_RUN_PARAMS} ${DOCKER_IMAGE_NAME}
 #----------------------------------------------------------------------------------------------------------------------
 # Targets
 #----------------------------------------------------------------------------------------------------------------------
-default: train
-.PHONY: build download-dataset train monitor export test
+default: run
+.PHONY: build run download-dataset train monitor export test
 
 build:
 	@$(call msg, Building Docker image ${DOCKER_IMAGE_NAME} ...)
@@ -56,7 +55,7 @@ train: build
 # Monitoring the training
 monitor: build
 	@$(call msg, Starting TensorBoard monitoring on ${DEVICE} ...)
-	docker run ${DOCKER_RUN_PARAMS} \
+	docker run -p 6002:6002 ${DOCKER_RUN_PARAMS}  \
 		bash -c "export TF_ENABLE_ONEDNN_OPTS=0 && \
 		[ '$(DEVICE)' = 'CPU' ] && export CUDA_VISIBLE_DEVICES='' || true && \
 		tensorboard --logdir=runs --bind_all --port=6006"
@@ -84,6 +83,14 @@ test: build
 			name=output \
 			exist_ok=True && \
 		mv ./output/$(notdir ${TEST_IMAGE}) ./output.jpg "
+
+run: build
+	@$(call msg, Running the application ...)
+	@docker run -p 5000:5000 ${DOCKER_RUN_PARAMS} bash -c "\
+		python3 ./app.py \
+			--model runs/segment/yolo11n-seg/weights/best.pt \
+			--source1 streams/v1.mp4 \
+			--source2 streams/v2.mp4 "
 
 #----------------------------------------------------------------------------------------------------------------------
 # Helper functions
