@@ -123,11 +123,11 @@ function startCalibration(cameraId) {
         button.querySelector('.btn-text').textContent = 'Drawing...';
     }
     
-    // Show instruction
-    info.textContent = 'Click to draw calibration polygon. Right-click to finish.';
+    // Show instruction for exactly 4 corners
+    info.textContent = 'Click exactly 4 corners to create calibration rectangle.';
     info.classList.add('show');
     
-    showNotification(`📐 Calibration started for Camera ${cameraId}. Video processing paused.`, 'info');
+    showNotification(`Calibration started for Camera ${cameraId}. Click exactly 4 corners.`, 'info');
 }
 
 function pauseVideoProcessing() {
@@ -154,6 +154,12 @@ function handleCanvasClick(event, cameraId) {
     const calibData = calibrationData[`camera${cameraId}`];
     
     if (!calibData.isCalibrating) return;
+    
+    // Stop if already have 4 points
+    if (calibData.points.length >= 4) {
+        showNotification('Rectangle complete. Right-click to finish.', 'info');
+        return;
+    }
     
     const canvas = document.getElementById(`canvas${cameraId}`);
     const rect = canvas.getBoundingClientRect();
@@ -193,11 +199,27 @@ function handleCanvasClick(event, cameraId) {
         ctx.stroke();
     }
     
-    // Update info
+    // Update info based on points count
     const info = document.getElementById(`calibrationInfo${cameraId}`);
-    info.textContent = `Points: ${calibData.points.length}. Right-click when done (minimum 3 points).`;
+    if (calibData.points.length < 4) {
+        info.textContent = `Point ${calibData.points.length}/4 added. ${4 - calibData.points.length} more needed.`;
+    } else {
+        // Auto-close rectangle after 4th point
+        const firstPoint = calibData.points[0];
+        const lastPoint = calibData.points[3];
+        
+        ctx.strokeStyle = '#4ecdc4';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(lastPoint.x, lastPoint.y);
+        ctx.lineTo(firstPoint.x, firstPoint.y);
+        ctx.stroke();
+        
+        info.textContent = 'Rectangle complete! Right-click to finish calibration.';
+        showNotification(`Rectangle complete for Camera ${cameraId}. Right-click to finish.`, 'success');
+    }
     
-    console.log(`Added point ${calibData.points.length} for camera ${cameraId}:`, { x: scaledX, y: scaledY });
+    console.log(`Added point ${calibData.points.length}/4 for camera ${cameraId}:`, { x: scaledX, y: scaledY });
 }
 
 function finishCalibrationProcess(cameraId) {
@@ -206,23 +228,10 @@ function finishCalibrationProcess(cameraId) {
     const info = document.getElementById(`calibrationInfo${cameraId}`);
     const button = document.querySelector(`.camera-feed:nth-child(${cameraId}) .btn-calibrate`);
     
-    if (calibData.points.length < 3) {
-        showNotification('❌ Need at least 3 points to create a polygon', 'error');
+    // Require exactly 4 points
+    if (calibData.points.length !== 4) {
+        showNotification(`Need exactly 4 points. Currently have ${calibData.points.length}.`, 'error');
         return;
-    }
-    
-    // Close polygon
-    const ctx = canvas.getContext('2d');
-    if (calibData.points.length > 2) {
-        const firstPoint = calibData.points[0];
-        const lastPoint = calibData.points[calibData.points.length - 1];
-        
-        ctx.strokeStyle = '#4ecdc4';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(lastPoint.x, lastPoint.y);
-        ctx.lineTo(firstPoint.x, firstPoint.y);
-        ctx.stroke();
     }
     
     // Deactivate canvas
@@ -238,7 +247,7 @@ function finishCalibrationProcess(cameraId) {
     // Resume video processing
     resumeVideoProcessing();
     
-    // Get real-world dimensions for each edge
+    // Get real-world dimensions for exactly 4 edges
     collectDimensions(cameraId);
 }
 
@@ -246,12 +255,12 @@ function collectDimensions(cameraId) {
     const calibData = calibrationData[`camera${cameraId}`];
     const points = calibData.points;
     
-    if (points.length < 3) {
-        showNotification('❌ Need at least 3 points for calibration', 'error');
+    if (points.length !== 4) {
+        showNotification('Need exactly 4 points for calibration', 'error');
         return;
     }
     
-    // Calculate distances for each edge
+    // Calculate distances for each edge of the rectangle
     const edges = [];
     for (let i = 0; i < points.length; i++) {
         const p1 = points[i];
@@ -288,7 +297,7 @@ function promptForDimensions(cameraId, edges, edgeIndex) {
     
     const meters = parseFloat(dimension);
     if (isNaN(meters) || meters <= 0) {
-        showNotification('❌ Please enter a valid positive number', 'error');
+        showNotification('Please enter a valid positive number', 'error');
         promptForDimensions(cameraId, edges, edgeIndex); // Retry same edge
         return;
     }
@@ -309,7 +318,7 @@ function calculateCalibration(cameraId) {
     const distances = calibData.distances;
     
     if (distances.length === 0) {
-        showNotification('❌ No dimensions provided', 'error');
+        showNotification('No dimensions provided', 'error');
         return;
     }
     
@@ -325,7 +334,7 @@ function calculateCalibration(cameraId) {
     });
     
     if (validCount === 0) {
-        showNotification('❌ No valid calibration data', 'error');
+        showNotification('No valid calibration data', 'error');
         return;
     }
     
@@ -337,7 +346,7 @@ function calculateCalibration(cameraId) {
     
     // Update display
     const info = document.getElementById(`calibrationInfo${cameraId}`);
-    info.textContent = `✅ Calibrated: ${areaSquareMeters.toFixed(2)} m² | ${calibData.pixelsPerMeter.toFixed(1)} px/m`;
+    info.textContent = `Calibrated: ${areaSquareMeters.toFixed(2)} m² | ${calibData.pixelsPerMeter.toFixed(1)} px/m`;
     info.classList.add('show');
     
     // Save calibration data
@@ -349,7 +358,7 @@ function calculateCalibration(cameraId) {
         points: calibData.points.length
     });
     
-    showNotification(`✅ Camera ${cameraId} calibrated successfully!`, 'success');
+    showNotification(`Camera ${cameraId} calibrated successfully!`, 'success');
 }
 
 function calculatePolygonArea(points) {
@@ -399,7 +408,7 @@ function clearCalibration(cameraId) {
     saveCalibrationData();
     
     console.log(`Cleared calibration for camera ${cameraId}`);
-    showNotification(`🗑️ Camera ${cameraId} calibration cleared`, 'info');
+    showNotification(`Camera ${cameraId} calibration cleared`, 'info');
 }
 
 function redrawCalibrationPolygon(cameraId) {
@@ -407,11 +416,11 @@ function redrawCalibrationPolygon(cameraId) {
     const canvas = document.getElementById(`canvas${cameraId}`);
     const info = document.getElementById(`calibrationInfo${cameraId}`);
     
-    if (calibData.points.length >= 3 && calibData.pixelsPerMeter) {
+    if (calibData.points.length === 4 && calibData.pixelsPerMeter) {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        // Draw polygon
+        // Draw rectangle
         ctx.strokeStyle = '#4ecdc4';
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -452,7 +461,7 @@ function redrawCalibrationPolygon(cameraId) {
         // Update info
         const areaPixels = calculatePolygonArea(calibData.points);
         const areaSquareMeters = areaPixels / (calibData.pixelsPerMeter * calibData.pixelsPerMeter);
-        info.textContent = `✅ Calibrated: ${areaSquareMeters.toFixed(2)} m² | ${calibData.pixelsPerMeter.toFixed(1)} px/m`;
+        info.textContent = `Calibrated: ${areaSquareMeters.toFixed(2)} m² | ${calibData.pixelsPerMeter.toFixed(1)} px/m`;
         info.classList.add('show');
     }
 }
@@ -650,7 +659,7 @@ function handleKeyboardShortcuts(event) {
         event.preventDefault();
         if (isProcessing) {
             refreshCameraStreams();
-            showNotification('🔄 Camera streams refreshed', 'info');
+            showNotification('Camera streams refreshed', 'info');
         }
     }
     
@@ -679,7 +688,7 @@ function cancelActiveCalibrations() {
     for (let cameraId = 1; cameraId <= 2; cameraId++) {
         if (calibrationData[`camera${cameraId}`].isCalibrating) {
             clearCalibration(cameraId);
-            showNotification(`❌ Calibration cancelled for Camera ${cameraId}`, 'info');
+            showNotification(`Calibration cancelled for Camera ${cameraId}`, 'info');
         }
     }
 }
@@ -688,7 +697,7 @@ function clearAllCalibrations() {
     if (confirm('Clear all calibrations? This cannot be undone.')) {
         clearCalibration(1);
         clearCalibration(2);
-        showNotification('🗑️ All calibrations cleared', 'info');
+        showNotification('All calibrations cleared', 'info');
     }
 }
 
@@ -761,7 +770,7 @@ function startProcessing() {
     updateStatus(true);
     startStatsUpdates();
     refreshCameraStreams();
-    showNotification('✅ Processing detected and connected!', 'success');
+    showNotification('Processing detected and connected!', 'success');
     console.log('Started processing mode');
 }
 
@@ -1012,13 +1021,13 @@ function toggleStatsVisibility() {
         volumeSection.style.display = volumeSection.style.display === 'none' ? 'block' : 'none';
     }
     
-    showNotification('📊 Statistics visibility toggled', 'info');
+    showNotification('Statistics visibility toggled', 'info');
 }
 
 function addHelpButton() {
     // Add floating help button
     const helpButton = document.createElement('button');
-    helpButton.innerHTML = '❓';
+    helpButton.innerHTML = '?';
     helpButton.onclick = showHelp;
     helpButton.title = 'Show Help';
     
@@ -1054,16 +1063,16 @@ function addHelpButton() {
 
 function addRefreshButton() {
     const refreshButton = document.createElement('button');
-    refreshButton.innerHTML = '🔄';
+    refreshButton.innerHTML = '↻';
     refreshButton.onclick = () => {
         console.log('Manual refresh triggered');
         if (isProcessing) {
             updateStats();
             refreshCameraStreams();
-            showNotification('🔄 Manual refresh completed', 'info');
+            showNotification('Manual refresh completed', 'info');
         } else {
             checkForProcessing();
-            showNotification('🔍 Checking for processing...', 'info');
+            showNotification('Checking for processing...', 'info');
         }
     };
     refreshButton.title = 'Manual Refresh';
@@ -1187,7 +1196,7 @@ window.exportCalibration = function() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     
-    showNotification('📥 Calibration data exported', 'success');
+    showNotification('Calibration data exported', 'success');
 };
 
 window.importCalibration = function() {
@@ -1210,10 +1219,10 @@ window.importCalibration = function() {
                         redrawCalibrationPolygon(2);
                     }, 500);
                     
-                    showNotification('📤 Calibration data imported successfully', 'success');
+                    showNotification('Calibration data imported successfully', 'success');
                     console.log('Imported calibration data:', calibrationData);
                 } catch (error) {
-                    showNotification('❌ Failed to import calibration data', 'error');
+                    showNotification('Failed to import calibration data', 'error');
                     console.error('Import error:', error);
                 }
             };
@@ -1258,7 +1267,7 @@ window.resetCalibration = function() {
         resumeVideoProcessing();
         
         saveCalibrationData();
-        showNotification('🔄 All calibration data reset', 'info');
+        showNotification('All calibration data reset', 'info');
         console.log('All calibration data reset');
     }
 };
@@ -1292,7 +1301,11 @@ updateStats = function() {
     return originalUpdateStats.apply(this, arguments);
 };
 
-console.log('Dual Camera YOLO interface with advanced calibration loaded successfully');
+// Make function globally accessible for HTML onclick handlers
+window.startCalibration = startCalibration;
+window.resizeCanvas = resizeCanvas;
+
+console.log('Dual Camera YOLO interface with 4-segment calibration loaded successfully');
 console.log('Available debug functions:');
 console.log('  debugStats() - Check current stats');
 console.log('  debugCalibration() - View calibration status');
@@ -1300,4 +1313,4 @@ console.log('  exportCalibration() - Download calibration data');
 console.log('  importCalibration() - Upload calibration data');
 console.log('  resetCalibration() - Reset all calibration data');
 console.log('Keyboard shortcuts: R (refresh), S (toggle stats), Ctrl+C (clear calibrations), Escape (cancel calibration)');
-console.log('Click Calibrate button to start calibration, right-click to finish polygon drawing');
+console.log('Click Calibrate button to start calibration - exactly 4 corners required');
