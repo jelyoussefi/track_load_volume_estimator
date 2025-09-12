@@ -89,8 +89,8 @@ run: build
 	@docker run -p 5000:5000 ${DOCKER_RUN_PARAMS} bash -c "\
 		python3 ./app.py \
 			--model runs/segment/yolo11n-seg/weights/best.pt \
-			--source1 streams/v1.mp4 \
-			--source2 streams/v2.mp4 "
+			--source1 streams/cam_1.mp4 \
+			--source2 streams/cam_2.mp4 "
 
 #----------------------------------------------------------------------------------------------------------------------
 # Helper functions
