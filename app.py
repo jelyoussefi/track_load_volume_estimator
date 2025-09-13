@@ -9,9 +9,10 @@ Features:
 - Web interface with side-by-side display
 - Volume estimation calculations
 - REST API endpoints
+- Processing pause/resume for calibration
 
 Author: AI Assistant
-Version: 1.0.0
+Version: 1.2.0
 """
 
 import os
@@ -56,6 +57,7 @@ class DualCameraYOLO:
         
         # Processing flags
         self.processing = False
+        self.processing_paused = False
         self.threads = []
         
         # Statistics with thread lock
@@ -107,6 +109,7 @@ class DualCameraYOLO:
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer to get latest frames
             
             self.processing = True
+            self.processing_paused = False
             
             # Clear queues
             while not self.frame_queue1.empty():
@@ -139,6 +142,23 @@ class DualCameraYOLO:
             self.stop_streams()
             raise
     
+    def pause_processing(self):
+        """Pause YOLO processing while keeping streams alive"""
+        with self.stats_lock:
+            self.processing_paused = True
+        logger.info("YOLO processing paused for calibration")
+
+    def resume_processing(self):
+        """Resume YOLO processing after calibration"""
+        with self.stats_lock:
+            self.processing_paused = False
+        logger.info("YOLO processing resumed after calibration")
+    
+    def is_paused(self) -> bool:
+        """Check if processing is currently paused"""
+        with self.stats_lock:
+            return self.processing_paused
+    
     def _process_camera(self, camera_id: int, cap: cv2.VideoCapture):
         """Process individual camera stream"""
         frame_queue = self.frame_queue1 if camera_id == 1 else self.frame_queue2
@@ -155,8 +175,26 @@ class DualCameraYOLO:
                 time.sleep(0.1)
                 continue
             
+            # Check if processing is paused
+            with self.stats_lock:
+                is_paused = self.processing_paused
+            
+            if is_paused:
+                # Just pass through the raw frame without YOLO processing
+                try:
+                    while not frame_queue.empty():
+                        try:
+                            frame_queue.get_nowait()
+                        except Empty:
+                            break
+                    frame_queue.put_nowait(frame)
+                except:
+                    pass
+                time.sleep(0.033)  # ~30 FPS when paused
+                continue
+            
             try:
-                # Run YOLO inference
+                # Run YOLO inference (only when not paused)
                 start_time = time.time()
                 results = self.model.predict(
                     source=frame,
@@ -195,7 +233,7 @@ class DualCameraYOLO:
                     self.stats[f'camera{camera_id}']['total_area'] = total_area
                 
                 # Log stats occasionally for debugging
-                if current_time - last_stats_update >= 5.0:  # Log every 5 seconds
+                if current_time - last_stats_update >= 10.0:  # Log every 10 seconds
                     with self.stats_lock:
                         logger.info(f"Camera {camera_id}: FPS={self.stats[f'camera{camera_id}']['fps']:.1f}, Objects={len(detections)}, Area={total_area:.0f}")
                     last_stats_update = current_time
@@ -319,7 +357,10 @@ class DualCameraYOLO:
     def get_stats(self) -> Dict:
         """Get current statistics safely"""
         with self.stats_lock:
-            return self.stats.copy()
+            stats = self.stats.copy()
+            # Add pause status to stats
+            stats['processing_paused'] = self.processing_paused
+            return stats
     
     def estimate_volume(self) -> float:
         """Estimate volume based on both camera views"""
@@ -408,14 +449,66 @@ def get_stats():
         # Get stats safely
         stats = yolo_processor.get_stats()
         
-        # Add debug logging
-        logger.debug(f"Stats endpoint - Camera1: FPS={stats['camera1']['fps']:.1f}, Objects={stats['camera1']['objects']}, Area={stats['camera1']['total_area']:.0f}")
-        logger.debug(f"Stats endpoint - Camera2: FPS={stats['camera2']['fps']:.1f}, Objects={stats['camera2']['objects']}, Area={stats['camera2']['total_area']:.0f}")
-        
         return jsonify(stats)
     else:
-        logger.warning("Stats requested but processor not running")
         return jsonify({'error': 'Processor not initialized or not running'})
+
+@app.route('/api/pause', methods=['POST'])
+def pause_processing():
+    """Pause YOLO processing for calibration"""
+    global yolo_processor
+    
+    try:
+        if yolo_processor and yolo_processor.processing:
+            yolo_processor.pause_processing()
+            logger.info("Processing paused via API request")
+            return jsonify({'status': 'success', 'message': 'Processing paused'})
+        else:
+            return jsonify({'status': 'error', 'message': 'No active processing to pause'})
+    
+    except Exception as e:
+        logger.error(f"Failed to pause processing: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/resume', methods=['POST'])
+def resume_processing():
+    """Resume YOLO processing after calibration"""
+    global yolo_processor
+    
+    try:
+        if yolo_processor and yolo_processor.processing:
+            yolo_processor.resume_processing()
+            logger.info("Processing resumed via API request")
+            return jsonify({'status': 'success', 'message': 'Processing resumed'})
+        else:
+            return jsonify({'status': 'error', 'message': 'No active processing to resume'})
+    
+    except Exception as e:
+        logger.error(f"Failed to resume processing: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/status')
+def get_status():
+    """Get current system status"""
+    global yolo_processor
+    
+    status = {
+        'processing': False,
+        'paused': False,
+        'cameras_active': {'camera1': False, 'camera2': False}
+    }
+    
+    if yolo_processor:
+        status['processing'] = yolo_processor.processing
+        status['paused'] = yolo_processor.is_paused()
+        
+        # Check camera status
+        if yolo_processor.cap1 and yolo_processor.cap1.isOpened():
+            status['cameras_active']['camera1'] = True
+        if yolo_processor.cap2 and yolo_processor.cap2.isOpened():
+            status['cameras_active']['camera2'] = True
+    
+    return jsonify(status)
 
 @app.route('/api/start', methods=['POST'])
 def start_processing():
@@ -423,7 +516,7 @@ def start_processing():
     global yolo_processor
     
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         model_path = data.get('model_path', 'yolo11n-seg.pt')
         source1 = data.get('source1', 0)
         source2 = data.get('source2', 1)
@@ -435,6 +528,7 @@ def start_processing():
         yolo_processor = DualCameraYOLO(model_path, confidence)
         yolo_processor.start_streams(source1, source2)
         
+        logger.info(f"Processing started via API: cameras {source1}, {source2}")
         return jsonify({'status': 'success', 'message': 'Processing started'})
     
     except Exception as e:
@@ -451,11 +545,22 @@ def stop_processing():
             yolo_processor.stop_streams()
             yolo_processor = None
         
+        logger.info("Processing stopped via API request")
         return jsonify({'status': 'success', 'message': 'Processing stopped'})
     
     except Exception as e:
         logger.error(f"Failed to stop processing: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# Health check endpoint
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': time.time(),
+        'version': '1.2.0'
+    })
 
 if __name__ == '__main__':
     import argparse
@@ -468,6 +573,7 @@ if __name__ == '__main__':
     parser.add_argument('--source2', default=1, help='Camera 2 source')
     parser.add_argument('--conf', type=float, default=0.5, help='Confidence threshold')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument('--no-auto-start', action='store_true', help='Disable auto-start processing')
     
     args = parser.parse_args()
     
@@ -475,8 +581,8 @@ if __name__ == '__main__':
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    # Auto-start processing if sources provided
-    if args.model and os.path.exists(args.model):
+    # Auto-start processing if sources provided and not disabled
+    if not args.no_auto_start and args.model and os.path.exists(args.model):
         try:
             yolo_processor = DualCameraYOLO(args.model, args.conf)
             yolo_processor.start_streams(args.source1, args.source2)

@@ -17,22 +17,22 @@
 
     <div class="container">
         <div class="header">
-            <h1>🚛 Truck Load Volume Estimator</h1>
+            <h1>Truck Load Volume Estimator</h1>
             <p>Real-time volume estimation using dual camera YOLO segmentation with 4-point calibration</p>
         </div>
 
         <div class="camera-container">
             <div class="camera-feed">
-                <h3>📹 Camera 1 - Left View</h3>
+                <h3>Camera 1 - Left View</h3>
                 <div class="camera-controls">
-                    <button class="btn btn-calibrate" onclick="startCalibration(1)">
-                        <span class="btn-icon">📏</span>
+                    <button class="btn btn-calibrate" onclick="calibrationManager.startCalibration(1)">
+                        <span class="btn-icon">&#x1F4CF;</span>
                         <span class="btn-text">Calibrate</span>
                     </button>
                 </div>
                 <div class="video-wrapper">
                     <div class="canvas-container" id="canvasContainer1">
-                        <img src="/video_feed/1" class="video-stream" id="camera1" alt="Camera 1 Stream" onload="resizeCanvas(1)">
+                        <img src="/video_feed/1" class="video-stream" id="camera1" alt="Camera 1 Stream" onload="calibrationManager.resizeCanvas(1)">
                         <canvas class="calibration-canvas" id="canvas1"></canvas>
                         <div class="calibration-info" id="calibrationInfo1"></div>
                     </div>
@@ -54,16 +54,16 @@
             </div>
 
             <div class="camera-feed">
-                <h3>📹 Camera 2 - Right View</h3>
+                <h3>Camera 2 - Right View</h3>
                 <div class="camera-controls">
-                    <button class="btn btn-calibrate" onclick="startCalibration(2)">
-                        <span class="btn-icon">📏</span>
+                    <button class="btn btn-calibrate" onclick="calibrationManager.startCalibration(2)">
+                        <span class="btn-icon">&#x1F4CF;</span>
                         <span class="btn-text">Calibrate</span>
                     </button>
                 </div>
                 <div class="video-wrapper">
                     <div class="canvas-container" id="canvasContainer2">
-                        <img src="/video_feed/2" class="video-stream" id="camera2" alt="Camera 2 Stream" onload="resizeCanvas(2)">
+                        <img src="/video_feed/2" class="video-stream" id="camera2" alt="Camera 2 Stream" onload="calibrationManager.resizeCanvas(2)">
                         <canvas class="calibration-canvas" id="canvas2"></canvas>
                         <div class="calibration-info" id="calibrationInfo2"></div>
                     </div>
@@ -86,7 +86,7 @@
         </div>
 
         <div class="volume-estimation">
-            <div class="volume-title">📊 Estimated Load Volume</div>
+            <div class="volume-title">Estimated Load Volume</div>
             <div class="volume-value" id="volumeValue">0.00</div>
             <div class="volume-unit">cubic meters (m³)</div>
             <div class="volume-description">
@@ -95,6 +95,14 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <!-- Load all JavaScript modules -->
+    <script src="{{ url_for('static', filename='js/config.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/calibration.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/processing.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/stats.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/volume.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

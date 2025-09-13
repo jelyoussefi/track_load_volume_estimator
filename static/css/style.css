@@ -1,4 +1,4 @@
-/* Dual Camera YOLO Web Interface Styles */
+/* Dual Camera YOLO Web Interface Styles - Updated for Modular Architecture */
 
 * {
     margin: 0;
@@ -389,6 +389,42 @@ body {
     100% { transform: rotate(360deg); }
 }
 
+/* Modal Styles */
+.modal-overlay {
+    backdrop-filter: blur(5px);
+}
+
+.modal-content {
+    animation: modalSlideIn 0.3s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from {
+        transform: scale(0.8) translateY(-20px);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1) translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Notification Styles */
+.notification {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(-50%) translateY(-20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
     .container {
@@ -524,20 +560,4 @@ body {
 .video-stream:focus {
     outline: 3px solid #4ecdc4;
     outline-offset: 2px;
-}
-
-/* Notification styles */
-.notification {
-    animation: slideIn 0.3s ease-out;
-}
-
-@keyframes slideIn {
-    from {
-        transform: translateX(-50%) translateY(-20px);
-        opacity: 0;
-    }
-    to {
-        transform: translateX(-50%) translateY(0);
-        opacity: 1;
-    }
 }
