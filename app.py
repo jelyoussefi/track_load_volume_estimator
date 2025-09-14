@@ -241,10 +241,10 @@ class DualCameraYOLO:
                     self.stats[f'camera{camera_id}']['objects'] = len(detections)
                     self.stats[f'camera{camera_id}']['total_area'] = total_area
                 
-                # Log stats occasionally for debugging
-                if current_time - last_stats_update >= 10.0:  # Log every 10 seconds
+                # Log stats occasionally for debugging (reduced frequency)
+                if current_time - last_stats_update >= 30.0:  # Log every 30 seconds instead of 10
                     with self.stats_lock:
-                        logger.info(f"Camera {camera_id}: FPS={self.stats[f'camera{camera_id}']['fps']:.1f}, Objects={len(detections)}, Area={total_area:.0f}")
+                        logger.debug(f"Camera {camera_id}: FPS={self.stats[f'camera{camera_id}']['fps']:.1f}, Objects={len(detections)}, Area={total_area:.0f}")
                     last_stats_update = current_time
                 
                 # Update frame queue (non-blocking)
@@ -599,5 +599,25 @@ if __name__ == '__main__':
         except Exception as e:
             logger.error(f"Failed to auto-start: {e}")
     
-    # Run Flask app
+    # Run Flask app with minimal logging
+    import sys
+    import os
+    
+    # Redirect stderr to suppress Flask startup messages if not in debug mode
+    if not args.debug:
+        # Create a custom log file for important messages only
+        class CustomLogFilter(logging.Filter):
+            def filter(self, record):
+                # Only allow important application messages, not HTTP requests
+                return (
+                    'werkzeug' not in record.name and
+                    not record.getMessage().startswith('172.') and
+                    not 'GET /' in record.getMessage() and
+                    not 'POST /' in record.getMessage()
+                )
+        
+        # Apply the filter to the root logger
+        for handler in logging.root.handlers:
+            handler.addFilter(CustomLogFilter())
+    
     app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)

@@ -135,10 +135,10 @@ window.CalibrationManager = {
         info.classList.add('show');
         
         if (window.Utils) {
-            window.Utils.showNotification(`Processing PAUSED for Camera ${cameraId} calibration. Click exactly ${requiredPoints} corners.`, 'info');
+            window.Utils.showNotification(`Camera ${cameraId} calibration ready. Click 4 corners.`, 'info');
         }
         
-        console.log(`Calibration UI setup complete for camera ${cameraId} - processing should be paused`);
+        console.log(`Calibration UI ready for camera ${cameraId}`);
     },
     
     /**
@@ -585,14 +585,8 @@ window.CalibrationManager = {
             ctx.closePath();
             ctx.stroke();
             
-            // Update info
-            const areaPixels = window.Utils ? 
-                window.Utils.calculatePolygonArea(calibData.points) : 
-                this.calculatePolygonAreaFallback(calibData.points);
-            const areaSquareMeters = areaPixels / (calibData.pixelsPerMeter * calibData.pixelsPerMeter);
-            const formatNumber = window.Utils ? window.Utils.formatNumber : ((num, dec = 2) => num.toFixed(dec));
-            info.textContent = `Calibrated: ${formatNumber(areaSquareMeters)} m² | ${formatNumber(calibData.pixelsPerMeter, 1)} px/m`;
-            info.classList.add('show');
+            // Update info - don't show calibration details, just hide info
+            info.classList.remove('show'); // Keep calibration info hidden
         }
     },
     
