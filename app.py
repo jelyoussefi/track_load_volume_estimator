@@ -146,13 +146,13 @@ class DualCameraYOLO:
         """Pause YOLO processing while keeping streams alive"""
         with self.stats_lock:
             self.processing_paused = True
-        logger.info("YOLO processing paused for calibration")
+        logger.info("YOLO processing paused for calibration - video streams will show RAW frames only")
 
     def resume_processing(self):
         """Resume YOLO processing after calibration"""
         with self.stats_lock:
             self.processing_paused = False
-        logger.info("YOLO processing resumed after calibration")
+        logger.info("YOLO processing resumed after calibration - YOLO inference restarted")
     
     def is_paused(self) -> bool:
         """Check if processing is currently paused"""
@@ -165,36 +165,45 @@ class DualCameraYOLO:
         fps_counter = 0
         fps_start = time.time()
         last_stats_update = time.time()
+        frozen_frame = None  # Store the last frame before pausing
         
         logger.info(f"Started processing camera {camera_id}")
         
         while self.processing and cap.isOpened():
+            # Check if processing is paused
+            with self.stats_lock:
+                is_paused = self.processing_paused
+            
+            if is_paused:
+                # During calibration: freeze video by reusing the last frame
+                if frozen_frame is not None:
+                    try:
+                        # Clear queue and put the frozen frame
+                        while not frame_queue.empty():
+                            try:
+                                frame_queue.get_nowait()
+                            except Empty:
+                                break
+                        frame_queue.put_nowait(frozen_frame.copy())
+                    except:
+                        pass
+                
+                # Don't read new frames during calibration - this freezes the video
+                time.sleep(0.1)  # Reduce CPU usage while paused
+                continue
+            
+            # Normal operation: read new frames
             ret, frame = cap.read()
             if not ret:
                 logger.warning(f"Camera {camera_id}: Failed to read frame")
                 time.sleep(0.1)
                 continue
             
-            # Check if processing is paused
-            with self.stats_lock:
-                is_paused = self.processing_paused
-            
-            if is_paused:
-                # Just pass through the raw frame without YOLO processing
-                try:
-                    while not frame_queue.empty():
-                        try:
-                            frame_queue.get_nowait()
-                        except Empty:
-                            break
-                    frame_queue.put_nowait(frame)
-                except:
-                    pass
-                time.sleep(0.033)  # ~30 FPS when paused
-                continue
+            # Store this frame as the potential frozen frame for calibration
+            frozen_frame = frame.copy()
             
             try:
-                # Run YOLO inference (only when not paused)
+                # Run YOLO inference
                 start_time = time.time()
                 results = self.model.predict(
                     source=frame,
