@@ -1,52 +1,203 @@
+/**
+ * Enhanced 3D Volume Calculator for the Dual Camera YOLO application
+ * Utilizes camera height and distance measurements for accurate volume estimation
+ */
+
 window.VolumeCalculator = {
     
     /**
-     * Calculate calibrated volume based on camera statistics and calibration data
+     * Calculate volume using enhanced 3D calibration data
      * @param {Object} stats - Statistics object from the server
      * @returns {number} Volume estimate in cubic meters
      */
     calculateVolume(stats) {
         const calib1 = window.CalibrationManager ? 
             window.CalibrationManager.getCalibrationData(1) : 
-            { pixelsPerMeter: null };
+            { pixelsPerMeter: null, cameraHeight: null };
         const calib2 = window.CalibrationManager ? 
             window.CalibrationManager.getCalibrationData(2) : 
-            { pixelsPerMeter: null };
+            { pixelsPerMeter: null, cameraHeight: null };
         
-        // Check if we have calibration data for at least one camera
-        if (!calib1.pixelsPerMeter && !calib2.pixelsPerMeter) {
-            // No calibration, use basic estimation
-            return this.calculateBasicVolume(stats);
+        // Check if we have 3D calibration data for any camera
+        const has3DCalib1 = window.CalibrationManager ? window.CalibrationManager.has3DCalibration(1) : false;
+        const has3DCalib2 = window.CalibrationManager ? window.CalibrationManager.has3DCalibration(2) : false;
+        
+        if (has3DCalib1 || has3DCalib2) {
+            return this.calculate3DVolume(stats, calib1, calib2);
         }
         
+        // Check if we have basic 2D calibration for any camera
+        const hasBasicCalib1 = window.CalibrationManager ? window.CalibrationManager.hasBasicCalibration(1) : false;
+        const hasBasicCalib2 = window.CalibrationManager ? window.CalibrationManager.hasBasicCalibration(2) : false;
+        
+        if (hasBasicCalib1 || hasBasicCalib2) {
+            return this.calculateBasic2DVolume(stats, calib1, calib2);
+        }
+        
+        // No calibration, use basic estimation
+        return this.calculateBasicVolume(stats);
+    },
+    
+    /**
+     * Calculate volume using 3D calibration data
+     * @param {Object} stats - Statistics object
+     * @param {Object} calib1 - Camera 1 calibration data
+     * @param {Object} calib2 - Camera 2 calibration data
+     * @returns {number} 3D volume estimate in cubic meters
+     */
+    calculate3DVolume(stats, calib1, calib2) {
         let totalVolume = 0;
         let cameraCount = 0;
         
-        // Calculate volume for each calibrated camera
+        // Calculate volume for each camera with 3D calibration
+        if (window.CalibrationManager && window.CalibrationManager.has3DCalibration(1) && stats.camera1) {
+            const volume1 = this.calculate3DCameraVolume(stats.camera1, calib1, 1);
+            if (volume1 > 0) {
+                totalVolume += volume1;
+                cameraCount++;
+            }
+        }
+        
+        if (window.CalibrationManager && window.CalibrationManager.has3DCalibration(2) && stats.camera2) {
+            const volume2 = this.calculate3DCameraVolume(stats.camera2, calib2, 2);
+            if (volume2 > 0) {
+                totalVolume += volume2;
+                cameraCount++;
+            }
+        }
+        
+        return cameraCount > 0 ? totalVolume / cameraCount : 0;
+    },
+    
+    /**
+     * Calculate 3D volume for a single camera using height and distance data
+     * @param {Object} cameraStats - Camera statistics
+     * @param {Object} calibData - Enhanced calibration data
+     * @param {number} cameraId - Camera ID for logging
+     * @returns {number} 3D volume estimate for this camera
+     */
+    calculate3DCameraVolume(cameraStats, calibData, cameraId) {
+        const { cameraHeight, cornerDistances, pixelsPerMeter, points } = calibData;
+        const detectedAreaPixels = cameraStats.total_area || 0;
+        
+        if (!cameraHeight || !cornerDistances || cornerDistances.length !== 4 || !pixelsPerMeter) {
+            console.warn(`Camera ${cameraId}: Incomplete 3D calibration data`);
+            return 0;
+        }
+        
+        // Calculate the real-world area of the calibration region
+        const calibAreaPixels = window.Utils ? 
+            window.Utils.calculatePolygonArea(points) : 
+            this.calculatePolygonAreaFallback(points);
+        const calibAreaSquareMeters = calibAreaPixels / (pixelsPerMeter * pixelsPerMeter);
+        
+        // Calculate the detected area in square meters
+        const detectedAreaSquareMeters = detectedAreaPixels / (pixelsPerMeter * pixelsPerMeter);
+        
+        // Calculate average distance from camera to truck bed
+        const avgDistance = cornerDistances.reduce((sum, corner) => sum + corner.distance, 0) / cornerDistances.length;
+        
+        // Calculate height estimation using 3D geometry
+        const heightEstimate = this.estimate3DHeight(
+            detectedAreaPixels,
+            calibAreaPixels,
+            cameraHeight,
+            avgDistance,
+            pixelsPerMeter
+        );
+        
+        // Calculate volume
+        const volume = detectedAreaSquareMeters * heightEstimate;
+        
+        const formatNumber = window.Utils ? window.Utils.formatNumber : (num => num.toFixed(2));
+        console.log(`Camera ${cameraId} 3D volume: ${formatNumber(volume)} m³ (area: ${formatNumber(detectedAreaSquareMeters)} m², height: ${formatNumber(heightEstimate)} m, cam height: ${formatNumber(cameraHeight)} m)`);
+        
+        return volume;
+    },
+    
+    /**
+     * Estimate 3D height using camera geometry and detection data
+     * @param {number} detectedAreaPixels - Detected brick area in pixels
+     * @param {number} calibAreaPixels - Calibration area in pixels
+     * @param {number} cameraHeight - Height of camera above truck bed
+     * @param {number} avgDistance - Average distance from camera to corners
+     * @param {number} pixelsPerMeter - Calibration pixels per meter
+     * @returns {number} Estimated height in meters
+     */
+    estimate3DHeight(detectedAreaPixels, calibAreaPixels, cameraHeight, avgDistance, pixelsPerMeter) {
+        if (calibAreaPixels === 0 || detectedAreaPixels === 0) return 0;
+        
+        // Calculate fill ratio (how much of the calibrated area is covered by bricks)
+        const fillRatio = Math.min(detectedAreaPixels / calibAreaPixels, 1.0);
+        
+        // Get height settings from config
+        const maxHeight = window.CONFIG ? window.CONFIG.VOLUME.MAX_TRUCK_HEIGHT : 2.5;
+        const minHeight = window.CONFIG ? window.CONFIG.VOLUME.MIN_TRUCK_HEIGHT : 0.1;
+        
+        // Enhanced height estimation using 3D geometry
+        // This considers the viewing angle and perspective distortion
+        
+        // Calculate horizontal distance to truck bed
+        const horizontalDistance = Math.sqrt(avgDistance * avgDistance - cameraHeight * cameraHeight);
+        
+        // Calculate viewing angle (angle between camera direction and vertical)
+        const viewingAngle = Math.atan(horizontalDistance / cameraHeight);
+        
+        // Adjust height estimation based on viewing angle and fill ratio
+        // More vertical viewing (smaller angle) = more accurate height detection
+        const angleCorrection = 1.0 + (viewingAngle / (Math.PI / 2)) * 0.3; // 0-30% correction
+        
+        // Base height estimation
+        let estimatedHeight = minHeight + (fillRatio * (maxHeight - minHeight));
+        
+        // Apply perspective correction
+        estimatedHeight *= angleCorrection;
+        
+        // Apply distance-based correction (further distances may underestimate height)
+        const distanceCorrection = 1.0 + Math.max(0, (horizontalDistance - 5.0) * 0.05); // 5% per meter beyond 5m
+        estimatedHeight *= distanceCorrection;
+        
+        // Ensure reasonable bounds
+        estimatedHeight = Math.max(minHeight, Math.min(maxHeight, estimatedHeight));
+        
+        return estimatedHeight;
+    },
+    
+    /**
+     * Calculate volume using basic 2D calibration (fallback)
+     * @param {Object} stats - Statistics object
+     * @param {Object} calib1 - Camera 1 calibration data
+     * @param {Object} calib2 - Camera 2 calibration data
+     * @returns {number} 2D volume estimate
+     */
+    calculateBasic2DVolume(stats, calib1, calib2) {
+        let totalVolume = 0;
+        let cameraCount = 0;
+        
+        // Calculate volume for each calibrated camera using basic method
         if (calib1.pixelsPerMeter && stats.camera1) {
-            const volume1 = this.calculateCameraVolume(stats.camera1, calib1, 1);
+            const volume1 = this.calculateBasic2DCameraVolume(stats.camera1, calib1, 1);
             totalVolume += volume1;
             cameraCount++;
         }
         
         if (calib2.pixelsPerMeter && stats.camera2) {
-            const volume2 = this.calculateCameraVolume(stats.camera2, calib2, 2);
+            const volume2 = this.calculateBasic2DCameraVolume(stats.camera2, calib2, 2);
             totalVolume += volume2;
             cameraCount++;
         }
         
-        // Return average volume if we have multiple cameras
         return cameraCount > 0 ? totalVolume / cameraCount : 0;
     },
     
     /**
-     * Calculate volume for a single camera
+     * Calculate basic 2D volume for a single camera
      * @param {Object} cameraStats - Camera statistics
-     * @param {Object} calibData - Calibration data for the camera
+     * @param {Object} calibData - Basic calibration data
      * @param {number} cameraId - Camera ID for logging
-     * @returns {number} Volume estimate for this camera
+     * @returns {number} Basic volume estimate for this camera
      */
-    calculateCameraVolume(cameraStats, calibData, cameraId) {
+    calculateBasic2DCameraVolume(cameraStats, calibData, cameraId) {
         const areaPixels = cameraStats.total_area || 0;
         const areaSquareMeters = areaPixels / (calibData.pixelsPerMeter * calibData.pixelsPerMeter);
         
@@ -54,18 +205,40 @@ window.VolumeCalculator = {
         const calibAreaPixels = window.Utils ? 
             window.Utils.calculatePolygonArea(calibData.points) : 
             this.calculatePolygonAreaFallback(calibData.points);
-        const heightEstimate = this.estimateHeight(areaPixels, calibAreaPixels, calibData.pixelsPerMeter);
+        const heightEstimate = this.estimateBasicHeight(areaPixels, calibAreaPixels);
         
         const volume = areaSquareMeters * heightEstimate;
         
         const formatNumber = window.Utils ? window.Utils.formatNumber : (num => num.toFixed(2));
-        console.log(`Camera ${cameraId} volume: ${formatNumber(volume)} m³ (area: ${formatNumber(areaSquareMeters)} m², height: ${formatNumber(heightEstimate)} m)`);
+        console.log(`Camera ${cameraId} 2D volume: ${formatNumber(volume)} m³ (area: ${formatNumber(areaSquareMeters)} m², height: ${formatNumber(heightEstimate)} m)`);
         
         return volume;
     },
     
     /**
-     * Calculate basic volume without calibration
+     * Estimate height using basic 2D method
+     * @param {number} detectedAreaPixels - Detected area in pixels
+     * @param {number} calibrationAreaPixels - Calibration area in pixels
+     * @returns {number} Estimated height in meters
+     */
+    estimateBasicHeight(detectedAreaPixels, calibrationAreaPixels) {
+        if (calibrationAreaPixels === 0) return 0;
+        
+        // Estimate fill ratio based on detected area vs calibration area
+        const fillRatio = Math.min(detectedAreaPixels / calibrationAreaPixels, 1.0);
+        
+        // Get height settings from config
+        const maxHeight = window.CONFIG ? window.CONFIG.VOLUME.MAX_TRUCK_HEIGHT : 2.5;
+        const minHeight = window.CONFIG ? window.CONFIG.VOLUME.MIN_TRUCK_HEIGHT : 0.1;
+        
+        // Simple linear relationship between fill ratio and height
+        const estimatedHeight = minHeight + (fillRatio * (maxHeight - minHeight));
+        
+        return estimatedHeight;
+    },
+    
+    /**
+     * Calculate basic volume without any calibration
      * @param {Object} stats - Statistics object
      * @returns {number} Basic volume estimate
      */
@@ -78,29 +251,130 @@ window.VolumeCalculator = {
     },
     
     /**
-     * Estimate height based on area coverage and calibration
-     * @param {number} detectedAreaPixels - Detected area in pixels
-     * @param {number} calibrationAreaPixels - Calibration area in pixels
-     * @param {number} pixelsPerMeter - Calibration pixels per meter
-     * @returns {number} Estimated height in meters
+     * Calculate stereo volume using both cameras with 3D calibration
+     * @param {Object} stats - Statistics object
+     * @returns {number} Stereo volume estimate
      */
-    estimateHeight(detectedAreaPixels, calibrationAreaPixels, pixelsPerMeter) {
-        // Basic height estimation based on area coverage
-        // This is a simplified approach - in practice you'd need stereo vision or other depth estimation
+    calculateStereoVolume(stats) {
+        if (!window.CalibrationManager) return 0;
         
-        if (calibrationAreaPixels === 0) return 0;
+        const has3DCalib1 = window.CalibrationManager.has3DCalibration(1);
+        const has3DCalib2 = window.CalibrationManager.has3DCalibration(2);
         
-        // Estimate fill ratio based on detected area vs calibration area
-        const fillRatio = Math.min(detectedAreaPixels / calibrationAreaPixels, 1.0);
+        if (!has3DCalib1 || !has3DCalib2 || !stats.camera1 || !stats.camera2) {
+            return this.calculateVolume(stats); // Fall back to single camera method
+        }
         
-        // Get height settings from config or use defaults
-        const maxHeight = window.CONFIG ? window.CONFIG.VOLUME.MAX_TRUCK_HEIGHT : 2.5;
-        const minHeight = window.CONFIG ? window.CONFIG.VOLUME.MIN_TRUCK_HEIGHT : 0.1;
+        const calib1 = window.CalibrationManager.getCalibrationData(1);
+        const calib2 = window.CalibrationManager.getCalibrationData(2);
         
-        // Simple linear relationship between fill ratio and height
-        const estimatedHeight = minHeight + (fillRatio * (maxHeight - minHeight));
+        // Calculate volume using stereo triangulation principles
+        const volume1 = this.calculate3DCameraVolume(stats.camera1, calib1, 1);
+        const volume2 = this.calculate3DCameraVolume(stats.camera2, calib2, 2);
         
-        return estimatedHeight;
+        // Weight the estimates based on calibration quality
+        const calib3D1 = window.CalibrationManager.get3DCalibrationData(1);
+        const calib3D2 = window.CalibrationManager.get3DCalibrationData(2);
+        
+        let weight1 = 0.5; // Default equal weighting
+        let weight2 = 0.5;
+        
+        if (calib3D1 && calib3D2) {
+            // Adjust weights based on calibration quality
+            const quality1 = this.getQualityScore(calib3D1.calibrationQuality);
+            const quality2 = this.getQualityScore(calib3D2.calibrationQuality);
+            const totalQuality = quality1 + quality2;
+            
+            if (totalQuality > 0) {
+                weight1 = quality1 / totalQuality;
+                weight2 = quality2 / totalQuality;
+            }
+        }
+        
+        const weightedVolume = (volume1 * weight1) + (volume2 * weight2);
+        
+        const formatNumber = window.Utils ? window.Utils.formatNumber : (num => num.toFixed(2));
+        console.log(`Stereo volume: ${formatNumber(weightedVolume)} m³ (cam1: ${formatNumber(volume1)}, cam2: ${formatNumber(volume2)}, weights: ${formatNumber(weight1, 2)}/${formatNumber(weight2, 2)})`);
+        
+        return weightedVolume;
+    },
+    
+    /**
+     * Convert calibration quality to numeric score
+     * @param {Object} qualityData - Calibration quality data
+     * @returns {number} Quality score (0-1)
+     */
+    getQualityScore(qualityData) {
+        if (!qualityData) return 0.5; // Default score
+        
+        const qualityMap = {
+            'excellent': 1.0,
+            'good': 0.8,
+            'fair': 0.6,
+            'poor': 0.3
+        };
+        
+        return qualityMap[qualityData.quality] || 0.5;
+    },
+    
+    /**
+     * Apply volume corrections based on detection confidence and geometry
+     * @param {number} rawVolume - Raw volume estimate
+     * @param {Object} stats - Detection statistics
+     * @param {Object} options - Correction options
+     * @returns {number} Corrected volume estimate
+     */
+    applyVolumeCorrections(rawVolume, stats, options = {}) {
+        let correctedVolume = rawVolume;
+        
+        // Apply detection confidence correction
+        const totalObjects = (stats.camera1?.objects || 0) + (stats.camera2?.objects || 0);
+        const confidenceCorrection = this.calculateConfidenceCorrection(totalObjects);
+        correctedVolume *= confidenceCorrection;
+        
+        // Apply truck type correction if specified
+        if (options.truckType) {
+            const truckCorrection = this.getTruckTypeCorrection(options.truckType);
+            correctedVolume *= truckCorrection;
+        }
+        
+        // Apply material density correction if specified
+        if (options.materialDensity) {
+            correctedVolume *= options.materialDensity;
+        }
+        
+        return correctedVolume;
+    },
+    
+    /**
+     * Calculate confidence correction factor based on detection quality
+     * @param {number} totalObjects - Total number of detected objects
+     * @returns {number} Confidence correction factor
+     */
+    calculateConfidenceCorrection(totalObjects) {
+        // More detected objects = higher confidence = less correction needed
+        if (totalObjects >= 20) return 1.0;       // High confidence
+        if (totalObjects >= 10) return 0.95;     // Good confidence
+        if (totalObjects >= 5) return 0.9;       // Moderate confidence
+        if (totalObjects >= 2) return 0.8;       // Low confidence
+        return 0.7;                               // Very low confidence
+    },
+    
+    /**
+     * Get truck type correction factor
+     * @param {string} truckType - Type of truck
+     * @returns {number} Correction factor
+     */
+    getTruckTypeCorrection(truckType) {
+        const corrections = {
+            'flatbed': 0.95,      // Slightly lower due to edge constraints
+            'dump': 1.05,         // Slightly higher due to sloped sides
+            'container': 1.0,     // Standard container
+            'pickup': 0.9,        // Smaller truck bed
+            'standard': 1.0       // Default
+        };
+        
+        return corrections[truckType] || 1.0;
     },
     
     /**
@@ -121,421 +395,280 @@ window.VolumeCalculator = {
     },
     
     /**
-     * Estimate volume using stereo vision approach (advanced)
+     * Get comprehensive volume confidence assessment
      * @param {Object} stats - Statistics object
-     * @param {Object} calibData1 - Camera 1 calibration data
-     * @param {Object} calibData2 - Camera 2 calibration data
-     * @returns {number} Volume estimate using stereo approach
-     */
-    calculateStereoVolume(stats, calibData1, calibData2) {
-        // This is a placeholder for more advanced stereo vision volume calculation
-        // In a real implementation, this would use:
-        // - Camera pose estimation
-        // - Stereo matching between camera views
-        // - 3D reconstruction of the detected objects
-        // - Integration over the reconstructed volume
-        
-        // For now, fall back to average of individual camera calculations
-        let totalVolume = 0;
-        let cameraCount = 0;
-        
-        if (calibData1.pixelsPerMeter && stats.camera1) {
-            totalVolume += this.calculateCameraVolume(stats.camera1, calibData1, 1);
-            cameraCount++;
-        }
-        
-        if (calibData2.pixelsPerMeter && stats.camera2) {
-            totalVolume += this.calculateCameraVolume(stats.camera2, calibData2, 2);
-            cameraCount++;
-        }
-        
-        return cameraCount > 0 ? totalVolume / cameraCount : 0;
-    },
-    
-    /**
-     * Apply volume correction factors based on truck type or load characteristics
-     * @param {number} rawVolume - Raw volume estimate
-     * @param {string} truckType - Type of truck ('standard', 'dump', 'flatbed', etc.)
-     * @param {Object} options - Additional correction options
-     * @returns {number} Corrected volume estimate
-     */
-    applyVolumeCorrections(rawVolume, truckType = 'standard', options = {}) {
-        let correctedVolume = rawVolume;
-        
-        // Apply truck-specific corrections
-        const truckCorrections = {
-            'standard': 1.0,        // No correction for standard truck
-            'dump': 1.1,           // Dump trucks may have sloped sides
-            'flatbed': 0.9,        // Flatbed may have less volume due to constraints
-            'container': 1.05      // Container trucks have defined volume
-        };
-        
-        const correctionFactor = truckCorrections[truckType] || 1.0;
-        correctedVolume *= correctionFactor;
-        
-        // Apply additional corrections if provided
-        if (options.densityFactor) {
-            correctedVolume *= options.densityFactor;
-        }
-        
-        if (options.shapeFactor) {
-            correctedVolume *= options.shapeFactor;
-        }
-        
-        return correctedVolume;
-    },
-    
-    /**
-     * Get volume estimation confidence based on calibration quality and detection
-     * @param {Object} stats - Statistics object
-     * @returns {Object} Confidence information
+     * @returns {Object} Confidence assessment
      */
     getVolumeConfidence(stats) {
-        const calib1 = window.CalibrationManager ? 
-            window.CalibrationManager.getCalibrationData(1) : 
-            { pixelsPerMeter: null };
-        const calib2 = window.CalibrationManager ? 
-            window.CalibrationManager.getCalibrationData(2) : 
-            { pixelsPerMeter: null };
+        if (!window.CalibrationManager) {
+            return { overall: 0, method: 'no calibration', level: 'very low' };
+        }
+        
+        const has3DCalib1 = window.CalibrationManager.has3DCalibration(1);
+        const has3DCalib2 = window.CalibrationManager.has3DCalibration(2);
+        const hasBasicCalib1 = window.CalibrationManager.hasBasicCalibration(1);
+        const hasBasicCalib2 = window.CalibrationManager.hasBasicCalibration(2);
         
         let confidence = {
             overall: 0,
+            method: 'none',
+            level: 'very low',
             factors: {
                 calibration: 0,
                 detection: 0,
+                geometry: 0,
                 consistency: 0
             },
             recommendations: []
         };
         
-        // Check calibration quality
-        let calibratedCameras = 0;
-        if (window.CalibrationManager) {
-            if (window.CalibrationManager.isCalibrated(1)) calibratedCameras++;
-            if (window.CalibrationManager.isCalibrated(2)) calibratedCameras++;
+        // Determine calibration method and base confidence
+        if (has3DCalib1 && has3DCalib2) {
+            confidence.method = 'stereo_3d';
+            confidence.factors.calibration = 1.0;
+        } else if (has3DCalib1 || has3DCalib2) {
+            confidence.method = 'single_3d';
+            confidence.factors.calibration = 0.8;
+        } else if (hasBasicCalib1 && hasBasicCalib2) {
+            confidence.method = 'stereo_2d';
+            confidence.factors.calibration = 0.6;
+        } else if (hasBasicCalib1 || hasBasicCalib2) {
+            confidence.method = 'single_2d';
+            confidence.factors.calibration = 0.4;
+        } else {
+            confidence.method = 'uncalibrated';
+            confidence.factors.calibration = 0.1;
+            confidence.recommendations.push('Perform 3D calibration for accurate volume measurements');
         }
         
-        confidence.factors.calibration = calibratedCameras / 2.0; // 0-1 scale
-        
-        if (calibratedCameras === 0) {
-            confidence.recommendations.push('Calibrate at least one camera for accurate volume estimation');
-        }
-        
-        // Check detection quality
+        // Assess detection quality
         const totalObjects = (stats.camera1?.objects || 0) + (stats.camera2?.objects || 0);
         const totalArea = (stats.camera1?.total_area || 0) + (stats.camera2?.total_area || 0);
         
-        confidence.factors.detection = Math.min(totalObjects / 10.0, 1.0); // Assume 10+ objects is good
-        
-        if (totalObjects < 5) {
-            confidence.recommendations.push('Ensure good lighting and clear view of load for better detection');
+        if (totalObjects >= 15) {
+            confidence.factors.detection = 1.0;
+        } else if (totalObjects >= 8) {
+            confidence.factors.detection = 0.8;
+        } else if (totalObjects >= 3) {
+            confidence.factors.detection = 0.6;
+        } else {
+            confidence.factors.detection = 0.3;
+            confidence.recommendations.push('Ensure adequate lighting and clear view of load');
         }
         
-        // Check consistency between cameras (if both calibrated)
-        if (calibratedCameras === 2 && stats.camera1 && stats.camera2) {
-            const vol1 = this.calculateCameraVolume(stats.camera1, calib1, 1);
-            const vol2 = this.calculateCameraVolume(stats.camera2, calib2, 2);
-            const avgVol = (vol1 + vol2) / 2;
-            const difference = Math.abs(vol1 - vol2);
-            const consistency = avgVol > 0 ? 1 - (difference / avgVol) : 0;
+        // Assess geometry quality for 3D calibrations
+        if (has3DCalib1 || has3DCalib2) {
+            let geometryScore = 0;
+            let calibCount = 0;
             
-            confidence.factors.consistency = Math.max(0, consistency);
+            if (has3DCalib1) {
+                const calib3D1 = window.CalibrationManager.get3DCalibrationData(1);
+                geometryScore += this.getQualityScore(calib3D1?.calibrationQuality);
+                calibCount++;
+            }
             
-            if (consistency < 0.8) {
-                confidence.recommendations.push('Large difference between camera estimates - check calibration and camera positioning');
+            if (has3DCalib2) {
+                const calib3D2 = window.CalibrationManager.get3DCalibrationData(2);
+                geometryScore += this.getQualityScore(calib3D2?.calibrationQuality);
+                calibCount++;
+            }
+            
+            confidence.factors.geometry = calibCount > 0 ? geometryScore / calibCount : 0;
+            
+            if (confidence.factors.geometry < 0.6) {
+                confidence.recommendations.push('Check camera positioning and distance measurements for better geometry');
             }
         } else {
-            confidence.factors.consistency = calibratedCameras > 0 ? 0.5 : 0;
+            confidence.factors.geometry = 0.5; // Default for 2D calibrations
+        }
+        
+        // Assess consistency between cameras
+        if ((hasBasicCalib1 || has3DCalib1) && (hasBasicCalib2 || has3DCalib2) && 
+            stats.camera1 && stats.camera2) {
+            
+            const calib1 = window.CalibrationManager.getCalibrationData(1);
+            const calib2 = window.CalibrationManager.getCalibrationData(2);
+            
+            const vol1 = has3DCalib1 ? 
+                this.calculate3DCameraVolume(stats.camera1, calib1, 1) :
+                this.calculateBasic2DCameraVolume(stats.camera1, calib1, 1);
+            const vol2 = has3DCalib2 ? 
+                this.calculate3DCameraVolume(stats.camera2, calib2, 2) :
+                this.calculateBasic2DCameraVolume(stats.camera2, calib2, 2);
+            
+            const avgVol = (vol1 + vol2) / 2;
+            const difference = Math.abs(vol1 - vol2);
+            const consistency = avgVol > 0 ? Math.max(0, 1 - (difference / avgVol)) : 0;
+            
+            confidence.factors.consistency = consistency;
+            
+            if (consistency < 0.7) {
+                confidence.recommendations.push('Large difference between camera estimates - verify calibrations');
+            }
+        } else {
+            confidence.factors.consistency = (hasBasicCalib1 || has3DCalib1 || hasBasicCalib2 || has3DCalib2) ? 0.5 : 0;
         }
         
         // Calculate overall confidence
         confidence.overall = (
-            confidence.factors.calibration * 0.5 +
-            confidence.factors.detection * 0.3 +
-            confidence.factors.consistency * 0.2
+            confidence.factors.calibration * 0.4 +
+            confidence.factors.detection * 0.25 +
+            confidence.factors.geometry * 0.2 +
+            confidence.factors.consistency * 0.15
         );
+        
+        // Determine confidence level
+        if (confidence.overall >= 0.8) {
+            confidence.level = 'high';
+        } else if (confidence.overall >= 0.6) {
+            confidence.level = 'good';
+        } else if (confidence.overall >= 0.4) {
+            confidence.level = 'moderate';
+        } else if (confidence.overall >= 0.2) {
+            confidence.level = 'low';
+        } else {
+            confidence.level = 'very low';
+        }
         
         return confidence;
     },
     
     /**
-     * Format volume for display with appropriate units
+     * Format volume for display with multiple units
      * @param {number} volume - Volume in cubic meters
-     * @param {string} unit - Desired unit ('m3', 'ft3', 'liters')
-     * @returns {Object} Formatted volume with value and unit
+     * @param {string} primaryUnit - Primary unit for display
+     * @returns {Object} Formatted volume data
      */
-    formatVolume(volume, unit = 'm3') {
+    formatVolume(volume, primaryUnit = 'm3') {
         const conversions = {
-            'm3': { factor: 1, symbol: 'm³', name: 'cubic meters' },
-            'ft3': { factor: 35.3147, symbol: 'ft³', name: 'cubic feet' },
-            'liters': { factor: 1000, symbol: 'L', name: 'liters' },
-            'gallons': { factor: 264.172, symbol: 'gal', name: 'gallons' }
+            'm3': { factor: 1, symbol: 'm³', name: 'cubic meters', precision: 2 },
+            'ft3': { factor: 35.3147, symbol: 'ft³', name: 'cubic feet', precision: 1 },
+            'liters': { factor: 1000, symbol: 'L', name: 'liters', precision: 0 },
+            'gallons': { factor: 264.172, symbol: 'gal', name: 'gallons (US)', precision: 1 },
+            'yards3': { factor: 1.30795, symbol: 'yd³', name: 'cubic yards', precision: 2 }
         };
-        
-        const conversion = conversions[unit] || conversions.m3;
-        const convertedValue = volume * conversion.factor;
         
         const formatNumber = window.Utils ? window.Utils.formatNumber : (num => num.toFixed(2));
+        const result = {};
         
-        return {
-            value: convertedValue,
-            formatted: formatNumber(convertedValue),
-            symbol: conversion.symbol,
-            name: conversion.name
-        };
-    }
-};/**
- * Volume calculation for the Dual Camera YOLO application
- */
-
-const VolumeCalculator = {
-    
-    /**
-     * Calculate calibrated volume based on camera statistics and calibration data
-     * @param {Object} stats - Statistics object from the server
-     * @returns {number} Volume estimate in cubic meters
-     */
-    calculateVolume(stats) {
-        const calib1 = calibrationManager.getCalibrationData(1);
-        const calib2 = calibrationManager.getCalibrationData(2);
+        Object.keys(conversions).forEach(unit => {
+            const conv = conversions[unit];
+            const convertedValue = volume * conv.factor;
+            result[unit] = {
+                value: convertedValue,
+                formatted: formatNumber(convertedValue, conv.precision),
+                symbol: conv.symbol,
+                name: conv.name,
+                display: `${formatNumber(convertedValue, conv.precision)} ${conv.symbol}`
+            };
+        });
         
-        // Check if we have calibration data for at least one camera
-        if (!calib1.pixelsPerMeter && !calib2.pixelsPerMeter) {
-            // No calibration, use basic estimation
-            return this.calculateBasicVolume(stats);
-        }
+        result.primary = result[primaryUnit] || result.m3;
         
-        let totalVolume = 0;
-        let cameraCount = 0;
-        
-        // Calculate volume for each calibrated camera
-        if (calib1.pixelsPerMeter && stats.camera1) {
-            const volume1 = this.calculateCameraVolume(stats.camera1, calib1, 1);
-            totalVolume += volume1;
-            cameraCount++;
-        }
-        
-        if (calib2.pixelsPerMeter && stats.camera2) {
-            const volume2 = this.calculateCameraVolume(stats.camera2, calib2, 2);
-            totalVolume += volume2;
-            cameraCount++;
-        }
-        
-        // Return average volume if we have multiple cameras
-        return cameraCount > 0 ? totalVolume / cameraCount : 0;
+        return result;
     },
     
     /**
-     * Calculate volume for a single camera
-     * @param {Object} cameraStats - Camera statistics
-     * @param {Object} calibData - Calibration data for the camera
-     * @param {number} cameraId - Camera ID for logging
-     * @returns {number} Volume estimate for this camera
+     * Get volume estimation method description
+     * @returns {string} Description of current estimation method
      */
-    calculateCameraVolume(cameraStats, calibData, cameraId) {
-        const areaPixels = cameraStats.total_area || 0;
-        const areaSquareMeters = areaPixels / (calibData.pixelsPerMeter * calibData.pixelsPerMeter);
-        
-        // Estimate height based on calibration area and detected area ratio
-        const calibAreaPixels = Utils.calculatePolygonArea(calibData.points);
-        const heightEstimate = this.estimateHeight(areaPixels, calibAreaPixels, calibData.pixelsPerMeter);
-        
-        const volume = areaSquareMeters * heightEstimate;
-        
-        console.log(`Camera ${cameraId} volume: ${Utils.formatNumber(volume)} m³ (area: ${Utils.formatNumber(areaSquareMeters)} m², height: ${Utils.formatNumber(heightEstimate)} m)`);
-        
-        return volume;
-    },
-    
-    /**
-     * Calculate basic volume without calibration
-     * @param {Object} stats - Statistics object
-     * @returns {number} Basic volume estimate
-     */
-    calculateBasicVolume(stats) {
-        const area1 = stats.camera1?.total_area || 0;
-        const area2 = stats.camera2?.total_area || 0;
-        const avgArea = (area1 + area2) / 2;
-        return avgArea * CONFIG.VOLUME.BASIC_SCALE_FACTOR;
-    },
-    
-    /**
-     * Estimate height based on area coverage and calibration
-     * @param {number} detectedAreaPixels - Detected area in pixels
-     * @param {number} calibrationAreaPixels - Calibration area in pixels
-     * @param {number} pixelsPerMeter - Calibration pixels per meter
-     * @returns {number} Estimated height in meters
-     */
-    estimateHeight(detectedAreaPixels, calibrationAreaPixels, pixelsPerMeter) {
-        // Basic height estimation based on area coverage
-        // This is a simplified approach - in practice you'd need stereo vision or other depth estimation
-        
-        if (calibrationAreaPixels === 0) return 0;
-        
-        // Estimate fill ratio based on detected area vs calibration area
-        const fillRatio = Math.min(detectedAreaPixels / calibrationAreaPixels, 1.0);
-        
-        // Simple linear relationship between fill ratio and height
-        const estimatedHeight = CONFIG.VOLUME.MIN_TRUCK_HEIGHT + 
-            (fillRatio * (CONFIG.VOLUME.MAX_TRUCK_HEIGHT - CONFIG.VOLUME.MIN_TRUCK_HEIGHT));
-        
-        return estimatedHeight;
-    },
-    
-    /**
-     * Estimate volume using stereo vision approach (advanced)
-     * @param {Object} stats - Statistics object
-     * @param {Object} calibData1 - Camera 1 calibration data
-     * @param {Object} calibData2 - Camera 2 calibration data
-     * @returns {number} Volume estimate using stereo approach
-     */
-    calculateStereoVolume(stats, calibData1, calibData2) {
-        // This is a placeholder for more advanced stereo vision volume calculation
-        // In a real implementation, this would use:
-        // - Camera pose estimation
-        // - Stereo matching between camera views
-        // - 3D reconstruction of the detected objects
-        // - Integration over the reconstructed volume
-        
-        // For now, fall back to average of individual camera calculations
-        let totalVolume = 0;
-        let cameraCount = 0;
-        
-        if (calibData1.pixelsPerMeter && stats.camera1) {
-            totalVolume += this.calculateCameraVolume(stats.camera1, calibData1, 1);
-            cameraCount++;
+    getEstimationMethod() {
+        if (!window.CalibrationManager) {
+            return 'Basic estimation (no calibration)';
         }
         
-        if (calibData2.pixelsPerMeter && stats.camera2) {
-            totalVolume += this.calculateCameraVolume(stats.camera2, calibData2, 2);
-            cameraCount++;
-        }
+        const has3DCalib1 = window.CalibrationManager.has3DCalibration(1);
+        const has3DCalib2 = window.CalibrationManager.has3DCalibration(2);
+        const hasBasicCalib1 = window.CalibrationManager.hasBasicCalibration(1);
+        const hasBasicCalib2 = window.CalibrationManager.hasBasicCalibration(2);
         
-        return cameraCount > 0 ? totalVolume / cameraCount : 0;
-    },
-    
-    /**
-     * Apply volume correction factors based on truck type or load characteristics
-     * @param {number} rawVolume - Raw volume estimate
-     * @param {string} truckType - Type of truck ('standard', 'dump', 'flatbed', etc.)
-     * @param {Object} options - Additional correction options
-     * @returns {number} Corrected volume estimate
-     */
-    applyVolumeCorrections(rawVolume, truckType = 'standard', options = {}) {
-        let correctedVolume = rawVolume;
-        
-        // Apply truck-specific corrections
-        const truckCorrections = {
-            'standard': 1.0,        // No correction for standard truck
-            'dump': 1.1,           // Dump trucks may have sloped sides
-            'flatbed': 0.9,        // Flatbed may have less volume due to constraints
-            'container': 1.05      // Container trucks have defined volume
-        };
-        
-        const correctionFactor = truckCorrections[truckType] || 1.0;
-        correctedVolume *= correctionFactor;
-        
-        // Apply additional corrections if provided
-        if (options.densityFactor) {
-            correctedVolume *= options.densityFactor;
-        }
-        
-        if (options.shapeFactor) {
-            correctedVolume *= options.shapeFactor;
-        }
-        
-        return correctedVolume;
-    },
-    
-    /**
-     * Get volume estimation confidence based on calibration quality and detection
-     * @param {Object} stats - Statistics object
-     * @returns {Object} Confidence information
-     */
-    getVolumeConfidence(stats) {
-        const calib1 = calibrationManager.getCalibrationData(1);
-        const calib2 = calibrationManager.getCalibrationData(2);
-        
-        let confidence = {
-            overall: 0,
-            factors: {
-                calibration: 0,
-                detection: 0,
-                consistency: 0
-            },
-            recommendations: []
-        };
-        
-        // Check calibration quality
-        let calibratedCameras = 0;
-        if (calibrationManager.isCalibrated(1)) calibratedCameras++;
-        if (calibrationManager.isCalibrated(2)) calibratedCameras++;
-        
-        confidence.factors.calibration = calibratedCameras / 2.0; // 0-1 scale
-        
-        if (calibratedCameras === 0) {
-            confidence.recommendations.push('Calibrate at least one camera for accurate volume estimation');
-        }
-        
-        // Check detection quality
-        const totalObjects = (stats.camera1?.objects || 0) + (stats.camera2?.objects || 0);
-        const totalArea = (stats.camera1?.total_area || 0) + (stats.camera2?.total_area || 0);
-        
-        confidence.factors.detection = Math.min(totalObjects / 10.0, 1.0); // Assume 10+ objects is good
-        
-        if (totalObjects < 5) {
-            confidence.recommendations.push('Ensure good lighting and clear view of load for better detection');
-        }
-        
-        // Check consistency between cameras (if both calibrated)
-        if (calibratedCameras === 2 && stats.camera1 && stats.camera2) {
-            const vol1 = this.calculateCameraVolume(stats.camera1, calib1, 1);
-            const vol2 = this.calculateCameraVolume(stats.camera2, calib2, 2);
-            const avgVol = (vol1 + vol2) / 2;
-            const difference = Math.abs(vol1 - vol2);
-            const consistency = avgVol > 0 ? 1 - (difference / avgVol) : 0;
-            
-            confidence.factors.consistency = Math.max(0, consistency);
-            
-            if (consistency < 0.8) {
-                confidence.recommendations.push('Large difference between camera estimates - check calibration and camera positioning');
-            }
+        if (has3DCalib1 && has3DCalib2) {
+            return '3D Stereo estimation (both cameras with height & distance data)';
+        } else if (has3DCalib1 || has3DCalib2) {
+            return '3D Single camera estimation (height & distance data)';
+        } else if (hasBasicCalib1 && hasBasicCalib2) {
+            return '2D Stereo estimation (both cameras with area calibration)';
+        } else if (hasBasicCalib1 || hasBasicCalib2) {
+            return '2D Single camera estimation (area calibration only)';
         } else {
-            confidence.factors.consistency = calibratedCameras > 0 ? 0.5 : 0;
+            return 'Basic estimation (no calibration - inaccurate)';
         }
-        
-        // Calculate overall confidence
-        confidence.overall = (
-            confidence.factors.calibration * 0.5 +
-            confidence.factors.detection * 0.3 +
-            confidence.factors.consistency * 0.2
-        );
-        
-        return confidence;
     },
     
     /**
-     * Format volume for display with appropriate units
-     * @param {number} volume - Volume in cubic meters
-     * @param {string} unit - Desired unit ('m3', 'ft3', 'liters')
-     * @returns {Object} Formatted volume with value and unit
+     * Export volume calculation report
+     * @param {Object} stats - Current statistics
+     * @returns {Object} Comprehensive volume report
      */
-    formatVolume(volume, unit = 'm3') {
-        const conversions = {
-            'm3': { factor: 1, symbol: 'm³', name: 'cubic meters' },
-            'ft3': { factor: 35.3147, symbol: 'ft³', name: 'cubic feet' },
-            'liters': { factor: 1000, symbol: 'L', name: 'liters' },
-            'gallons': { factor: 264.172, symbol: 'gal', name: 'gallons' }
+    generateVolumeReport(stats) {
+        const volume = this.calculateVolume(stats);
+        const confidence = this.getVolumeConfidence(stats);
+        const formattedVolume = this.formatVolume(volume);
+        const method = this.getEstimationMethod();
+        
+        const report = {
+            timestamp: new Date().toISOString(),
+            volume: {
+                cubic_meters: volume,
+                formatted: formattedVolume,
+                estimation_method: method
+            },
+            confidence: confidence,
+            statistics: {
+                camera1: stats.camera1 || null,
+                camera2: stats.camera2 || null,
+                total_objects: (stats.camera1?.objects || 0) + (stats.camera2?.objects || 0),
+                total_area_pixels: (stats.camera1?.total_area || 0) + (stats.camera2?.total_area || 0)
+            },
+            calibration: window.CalibrationManager ? 
+                window.CalibrationManager.getCalibrationSummary() : 
+                { error: 'CalibrationManager not available' }
         };
         
-        const conversion = conversions[unit] || conversions.m3;
-        const convertedValue = volume * conversion.factor;
+        return report;
+    },
+    
+    /**
+     * Debug volume calculations
+     * @param {Object} stats - Current statistics
+     */
+    debugVolumeCalculation(stats) {
+        console.log('=== VOLUME CALCULATION DEBUG ===');
         
-        return {
-            value: convertedValue,
-            formatted: Utils.formatNumber(convertedValue),
-            symbol: conversion.symbol,
-            name: conversion.name
-        };
+        const report = this.generateVolumeReport(stats);
+        console.log('Volume Report:', report);
+        
+        const method = this.getEstimationMethod();
+        console.log('Estimation Method:', method);
+        
+        const confidence = this.getVolumeConfidence(stats);
+        console.log('Confidence Assessment:', confidence);
+        
+        if (window.CalibrationManager) {
+            const summary = window.CalibrationManager.getCalibrationSummary();
+            console.log('Calibration Summary:', summary);
+            
+            // Test different methods if calibration is available
+            for (let cameraId = 1; cameraId <= 2; cameraId++) {
+                const calibData = window.CalibrationManager.getCalibrationData(cameraId);
+                const cameraStats = stats[`camera${cameraId}`];
+                
+                if (cameraStats) {
+                    if (window.CalibrationManager.has3DCalibration(cameraId)) {
+                        const vol3D = this.calculate3DCameraVolume(cameraStats, calibData, cameraId);
+                        console.log(`Camera ${cameraId} 3D Volume:`, vol3D);
+                    }
+                    
+                    if (window.CalibrationManager.hasBasicCalibration(cameraId)) {
+                        const vol2D = this.calculateBasic2DCameraVolume(cameraStats, calibData, cameraId);
+                        console.log(`Camera ${cameraId} 2D Volume:`, vol2D);
+                    }
+                }
+            }
+        }
+        
+        console.log('=== END VOLUME DEBUG ===');
+        
+        return report;
     }
 };

@@ -3,8 +3,245 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dual Camera YOLO - Truck Load Volume Estimation</title>
+    <title>Dual Camera YOLO - 3D Truck Load Volume Estimation</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Enhanced styles for 3D calibration display */
+        .calibration-status {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        
+        .status-header {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #4ecdc4;
+            text-align: center;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-size: 0.9em;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .status-label {
+            color: #b0b0b0;
+            font-size: 0.85em;
+        }
+        
+        .status-value {
+            color: #ffffff;
+            font-weight: 600;
+        }
+        
+        .status-value.status-3d { color: #4ecdc4; }
+        .status-value.status-2d { color: #f9ca24; }
+        .status-value.status-none { color: #eb4d4b; }
+        .status-value.quality-excellent { color: #4ecdc4; }
+        .status-value.quality-good { color: #45b7d1; }
+        .status-value.quality-fair { color: #f9ca24; }
+        .status-value.quality-poor { color: #eb4d4b; }
+        
+        .volume-alternatives {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 15px 0;
+            font-size: 1.1em;
+            opacity: 0.8;
+        }
+        
+        .alt-volume {
+            color: #e0e0e0;
+            font-weight: 500;
+        }
+        
+        .volume-method {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .method-text {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+            color: #4ecdc4;
+            font-weight: 600;
+        }
+        
+        .confidence-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 0.9em;
+        }
+        
+        .confidence-bar {
+            width: 120px;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .confidence-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease, background-color 0.3s ease;
+        }
+        
+        .confidence-text {
+            font-weight: 600;
+            min-width: 60px;
+        }
+        
+        .calibration-panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        .calibration-panel h3 {
+            margin-bottom: 15px;
+            color: #4ecdc4;
+        }
+        
+        .calibration-controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #f9ca24 0%, #f0932b 100%);
+            color: white;
+        }
+        
+        .btn-info {
+            background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
+            color: white;
+        }
+        
+        .volume-report {
+            max-width: 600px;
+            color: white;
+        }
+        
+        .report-timestamp {
+            text-align: center;
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 20px;
+        }
+        
+        .report-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+        }
+        
+        .report-section h4 {
+            color: #4ecdc4;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+        
+        .primary-volume {
+            font-size: 2em;
+            font-weight: bold;
+            text-align: center;
+            color: #4ecdc4;
+            margin-bottom: 5px;
+        }
+        
+        .alt-volumes {
+            text-align: center;
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 10px;
+        }
+        
+        .estimation-method {
+            text-align: center;
+            font-style: italic;
+            font-size: 0.9em;
+        }
+        
+        .confidence-factors {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+            margin: 10px 0;
+            font-size: 0.9em;
+        }
+        
+        .recommendations {
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+        
+        .recommendations ul {
+            margin: 5px 0;
+            padding-left: 20px;
+        }
+        
+        .detection-data, .calibration-data {
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+        
+        .camera-calibration {
+            margin-bottom: 10px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+        }
+        
+        @media (max-width: 768px) {
+            .status-grid {
+                grid-template-columns: 1fr;
+                gap: 6px;
+            }
+            
+            .volume-alternatives {
+                flex-direction: column;
+                gap: 8px;
+            }
+            
+            .calibration-controls {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .confidence-factors {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
 <body>
     <div class="loading-overlay" id="loadingOverlay">
@@ -17,22 +254,22 @@
 
     <div class="container">
         <div class="header">
-            <h1>Truck Load Volume Estimator</h1>
-            <p>Real-time volume estimation using dual camera YOLO segmentation with 4-point calibration</p>
+            <h1>3D Truck Load Volume Estimator</h1>
+            <p>Real-time 3D volume estimation using dual camera YOLO segmentation with camera height and distance calibration</p>
         </div>
 
         <div class="camera-container">
             <div class="camera-feed">
                 <h3>Camera 1 - Left View</h3>
                 <div class="camera-controls">
-                    <button class="btn btn-calibrate" onclick="calibrationManager.startCalibration(1)">
+                    <button class="btn btn-calibrate" onclick="window.CalibrationManager && window.CalibrationManager.startCalibration(1)">
                         <span class="btn-icon">&#x1F4CF;</span>
-                        <span class="btn-text">Calibrate</span>
+                        <span class="btn-text">3D Calibrate</span>
                     </button>
                 </div>
                 <div class="video-wrapper">
                     <div class="canvas-container" id="canvasContainer1">
-                        <img src="/video_feed/1" class="video-stream" id="camera1" alt="Camera 1 Stream" onload="calibrationManager.resizeCanvas(1)">
+                        <img src="/video_feed/1" class="video-stream" id="camera1" alt="Camera 1 Stream" onload="window.CalibrationManager && window.CalibrationManager.resizeCanvas(1)">
                         <canvas class="calibration-canvas" id="canvas1"></canvas>
                         <div class="calibration-info" id="calibrationInfo1"></div>
                     </div>
@@ -51,19 +288,42 @@
                         <div class="stat-value" id="area1">0</div>
                     </div>
                 </div>
+                
+                <!-- Enhanced 3D Calibration Status for Camera 1 -->
+                <div class="calibration-status" id="calibrationStatus1">
+                    <div class="status-header">3D Calibration Status</div>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="status-label">Camera Height:</span>
+                            <span class="status-value" id="cameraHeight1">Not set</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Calibration:</span>
+                            <span class="status-value" id="calibrationType1">None</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Quality:</span>
+                            <span class="status-value" id="calibrationQuality1">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Avg Distance:</span>
+                            <span class="status-value" id="avgDistance1">-</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="camera-feed">
                 <h3>Camera 2 - Right View</h3>
                 <div class="camera-controls">
-                    <button class="btn btn-calibrate" onclick="calibrationManager.startCalibration(2)">
+                    <button class="btn btn-calibrate" onclick="window.CalibrationManager && window.CalibrationManager.startCalibration(2)">
                         <span class="btn-icon">&#x1F4CF;</span>
-                        <span class="btn-text">Calibrate</span>
+                        <span class="btn-text">3D Calibrate</span>
                     </button>
                 </div>
                 <div class="video-wrapper">
                     <div class="canvas-container" id="canvasContainer2">
-                        <img src="/video_feed/2" class="video-stream" id="camera2" alt="Camera 2 Stream" onload="calibrationManager.resizeCanvas(2)">
+                        <img src="/video_feed/2" class="video-stream" id="camera2" alt="Camera 2 Stream" onload="window.CalibrationManager && window.CalibrationManager.resizeCanvas(2)">
                         <canvas class="calibration-canvas" id="canvas2"></canvas>
                         <div class="calibration-info" id="calibrationInfo2"></div>
                     </div>
@@ -82,20 +342,89 @@
                         <div class="stat-value" id="area2">0</div>
                     </div>
                 </div>
+                
+                <!-- Enhanced 3D Calibration Status for Camera 2 -->
+                <div class="calibration-status" id="calibrationStatus2">
+                    <div class="status-header">3D Calibration Status</div>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="status-label">Camera Height:</span>
+                            <span class="status-value" id="cameraHeight2">Not set</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Calibration:</span>
+                            <span class="status-value" id="calibrationType2">None</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Quality:</span>
+                            <span class="status-value" id="calibrationQuality2">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Avg Distance:</span>
+                            <span class="status-value" id="avgDistance2">-</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
+        <!-- Enhanced Volume Estimation Section -->
         <div class="volume-estimation">
             <div class="volume-title">Estimated Load Volume</div>
-            <div class="volume-value" id="volumeValue">0.00</div>
-            <div class="volume-unit">cubic meters (m³)</div>
+            <div class="volume-main">
+                <div class="volume-value" id="volumeValue">0.00</div>
+                <div class="volume-unit">cubic meters (m³)</div>
+            </div>
+            
+            <!-- Volume Alternatives Display -->
+            <div class="volume-alternatives" id="volumeAlternatives">
+                <div class="alt-volume" id="volumeFt3">0.0 ft³</div>
+                <div class="alt-volume" id="volumeYards">0.00 yd³</div>
+                <div class="alt-volume" id="volumeLiters">0 L</div>
+            </div>
+            
+            <!-- Estimation Method and Confidence -->
+            <div class="volume-method" id="volumeMethod">
+                <div class="method-text">Basic estimation (no calibration)</div>
+                <div class="confidence-indicator">
+                    <span class="confidence-label">Confidence:</span>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" id="confidenceFill" style="width: 0%"></div>
+                    </div>
+                    <span class="confidence-text" id="confidenceText">Very Low</span>
+                </div>
+            </div>
+            
             <div class="volume-description">
-                * Volume estimation based on segmented brick areas from both cameras with 4-point calibration
+                * 3D volume estimation using camera height, distance measurements, and dual camera YOLO segmentation
+            </div>
+        </div>
+
+        <!-- Calibration Management Panel -->
+        <div class="calibration-panel">
+            <h3>Calibration Management</h3>
+            <div class="calibration-controls">
+                <button class="btn btn-secondary" onclick="window.CalibrationManager && window.CalibrationManager.exportCalibration()">
+                    <span class="btn-icon">💾</span>
+                    <span class="btn-text">Export Calibration</span>
+                </button>
+                <button class="btn btn-secondary" onclick="window.CalibrationManager && window.CalibrationManager.importCalibration()">
+                    <span class="btn-icon">📁</span>
+                    <span class="btn-text">Import Calibration</span>
+                </button>
+                <button class="btn btn-warning" onclick="window.CalibrationManager && window.CalibrationManager.resetCalibration()">
+                    <span class="btn-icon">🔄</span>
+                    <span class="btn-text">Reset All</span>
+                </button>
+                <button class="btn btn-info" onclick="showVolumeReport()">
+                    <span class="btn-icon">📊</span>
+                    <span class="btn-text">Volume Report</span>
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- Load all JavaScript modules -->
+    <!-- Enhanced JavaScript with 3D capabilities -->
     <script src="{{ url_for('static', filename='js/config.js') }}"></script>
     <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
     <script src="{{ url_for('static', filename='js/calibration.js') }}"></script>
@@ -104,5 +433,273 @@
     <script src="{{ url_for('static', filename='js/volume.js') }}"></script>
     <script src="{{ url_for('static', filename='js/ui.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    
+    <!-- Additional 3D UI management -->
+    <script>
+        // Enhanced UI functions for 3D calibration display
+        
+        /**
+         * Update calibration status display
+         */
+        function updateCalibrationStatus() {
+            if (!window.CalibrationManager) return;
+            
+            for (let cameraId = 1; cameraId <= 2; cameraId++) {
+                const calibData = window.CalibrationManager.getCalibrationData(cameraId);
+                const calib3D = window.CalibrationManager.get3DCalibrationData(cameraId);
+                
+                // Update camera height
+                const heightElement = document.getElementById(`cameraHeight${cameraId}`);
+                if (heightElement) {
+                    heightElement.textContent = calibData.cameraHeight ? 
+                        `${calibData.cameraHeight.toFixed(2)}m` : 'Not set';
+                }
+                
+                // Update calibration type
+                const typeElement = document.getElementById(`calibrationType${cameraId}`);
+                if (typeElement) {
+                    if (window.CalibrationManager.has3DCalibration(cameraId)) {
+                        typeElement.textContent = '3D Complete';
+                        typeElement.className = 'status-value status-3d';
+                    } else if (window.CalibrationManager.hasBasicCalibration(cameraId)) {
+                        typeElement.textContent = '2D Only';
+                        typeElement.className = 'status-value status-2d';
+                    } else {
+                        typeElement.textContent = 'None';
+                        typeElement.className = 'status-value status-none';
+                    }
+                }
+                
+                // Update calibration quality
+                const qualityElement = document.getElementById(`calibrationQuality${cameraId}`);
+                if (qualityElement && calib3D && calib3D.calibrationQuality) {
+                    const quality = calib3D.calibrationQuality.quality;
+                    qualityElement.textContent = quality.charAt(0).toUpperCase() + quality.slice(1);
+                    qualityElement.className = `status-value quality-${quality}`;
+                } else if (qualityElement) {
+                    qualityElement.textContent = '-';
+                    qualityElement.className = 'status-value';
+                }
+                
+                // Update average distance
+                const distanceElement = document.getElementById(`avgDistance${cameraId}`);
+                if (distanceElement && calib3D) {
+                    distanceElement.textContent = `${calib3D.averageHorizontalDistance.toFixed(1)}m`;
+                } else if (distanceElement) {
+                    distanceElement.textContent = '-';
+                }
+            }
+        }
+        
+        /**
+         * Update volume display with multiple units and confidence
+         */
+        function updateVolumeDisplay(volume) {
+            if (!window.VolumeCalculator) return;
+            
+            // Format volume in multiple units
+            const formatted = window.VolumeCalculator.formatVolume(volume);
+            
+            // Update main volume display
+            const volumeElement = document.getElementById('volumeValue');
+            if (volumeElement) {
+                volumeElement.textContent = formatted.m3.formatted;
+            }
+            
+            // Update alternative units
+            const ft3Element = document.getElementById('volumeFt3');
+            const yardsElement = document.getElementById('volumeYards');
+            const litersElement = document.getElementById('volumeLiters');
+            
+            if (ft3Element) ft3Element.textContent = formatted.ft3.display;
+            if (yardsElement) yardsElement.textContent = formatted.yards3.display;
+            if (litersElement) litersElement.textContent = formatted.liters.display;
+            
+            // Update estimation method
+            const methodElement = document.querySelector('.method-text');
+            if (methodElement) {
+                methodElement.textContent = window.VolumeCalculator.getEstimationMethod();
+            }
+        }
+        
+        /**
+         * Update confidence indicator
+         */
+        function updateConfidenceDisplay(stats) {
+            if (!window.VolumeCalculator) return;
+            
+            const confidence = window.VolumeCalculator.getVolumeConfidence(stats);
+            
+            // Update confidence bar
+            const fillElement = document.getElementById('confidenceFill');
+            const textElement = document.getElementById('confidenceText');
+            
+            if (fillElement && textElement) {
+                const percentage = confidence.overall * 100;
+                fillElement.style.width = `${percentage}%`;
+                
+                // Set color based on confidence level
+                if (confidence.level === 'high') {
+                    fillElement.style.backgroundColor = '#4ecdc4';
+                } else if (confidence.level === 'good') {
+                    fillElement.style.backgroundColor = '#45b7d1';
+                } else if (confidence.level === 'moderate') {
+                    fillElement.style.backgroundColor = '#f9ca24';
+                } else if (confidence.level === 'low') {
+                    fillElement.style.backgroundColor = '#f0932b';
+                } else {
+                    fillElement.style.backgroundColor = '#eb4d4b';
+                }
+                
+                textElement.textContent = confidence.level.charAt(0).toUpperCase() + confidence.level.slice(1);
+            }
+        }
+        
+        /**
+         * Show comprehensive volume report
+         */
+        function showVolumeReport() {
+            if (!window.VolumeCalculator || !window.StatsManager) {
+                alert('Volume calculator not available');
+                return;
+            }
+            
+            // Get current stats
+            fetch('/api/stats')
+                .then(response => response.json())
+                .then(stats => {
+                    if (stats.error) {
+                        alert('No current data available for report');
+                        return;
+                    }
+                    
+                    const report = window.VolumeCalculator.generateVolumeReport(stats);
+                    displayVolumeReport(report);
+                })
+                .catch(error => {
+                    console.error('Failed to generate volume report:', error);
+                    alert('Failed to generate volume report');
+                });
+        }
+        
+        /**
+         * Display volume report in a modal
+         */
+        function displayVolumeReport(report) {
+            const reportHtml = `
+                <div class="volume-report">
+                    <h3>Volume Estimation Report</h3>
+                    <div class="report-timestamp">Generated: ${new Date(report.timestamp).toLocaleString()}</div>
+                    
+                    <div class="report-section">
+                        <h4>Volume Estimate</h4>
+                        <div class="volume-data">
+                            <div class="primary-volume">${report.volume.formatted.m3.display}</div>
+                            <div class="alt-volumes">
+                                <span>${report.volume.formatted.ft3.display}</span> | 
+                                <span>${report.volume.formatted.yards3.display}</span> | 
+                                <span>${report.volume.formatted.liters.display}</span>
+                            </div>
+                            <div class="estimation-method">${report.volume.estimation_method}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="report-section">
+                        <h4>Confidence Assessment</h4>
+                        <div class="confidence-data">
+                            <div class="confidence-overall">Overall: ${(report.confidence.overall * 100).toFixed(1)}% (${report.confidence.level})</div>
+                            <div class="confidence-factors">
+                                <div>Calibration: ${(report.confidence.factors.calibration * 100).toFixed(1)}%</div>
+                                <div>Detection: ${(report.confidence.factors.detection * 100).toFixed(1)}%</div>
+                                <div>Geometry: ${(report.confidence.factors.geometry * 100).toFixed(1)}%</div>
+                                <div>Consistency: ${(report.confidence.factors.consistency * 100).toFixed(1)}%</div>
+                            </div>
+                            ${report.confidence.recommendations.length > 0 ? 
+                                `<div class="recommendations">
+                                    <strong>Recommendations:</strong>
+                                    <ul>${report.confidence.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>
+                                </div>` : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="report-section">
+                        <h4>Detection Statistics</h4>
+                        <div class="detection-data">
+                            <div>Total Objects Detected: ${report.statistics.total_objects}</div>
+                            <div>Total Area (pixels): ${Math.round(report.statistics.total_area_pixels)}</div>
+                            <div>Camera 1: ${report.statistics.camera1 ? `${report.statistics.camera1.objects} objects, ${Math.round(report.statistics.camera1.total_area)} px` : 'No data'}</div>
+                            <div>Camera 2: ${report.statistics.camera2 ? `${report.statistics.camera2.objects} objects, ${Math.round(report.statistics.camera2.total_area)} px` : 'No data'}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="report-section">
+                        <h4>Calibration Status</h4>
+                        <div class="calibration-data">
+                            ${Object.entries(report.calibration).map(([camera, data]) => `
+                                <div class="camera-calibration">
+                                    <strong>${camera.toUpperCase()}:</strong>
+                                    <div>3D Calibrated: ${data.isFullyCalibrated ? 'Yes' : 'No'}</div>
+                                    ${data.cameraHeight ? `<div>Height: ${data.cameraHeight.toFixed(2)}m</div>` : ''}
+                                    ${data.calibrationQuality ? `<div>Quality: ${data.calibrationQuality.quality}</div>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Create and show modal
+            if (window.UIManager && window.UIManager.createModal) {
+                window.UIManager.createModal('Volume Report', reportHtml, [
+                    {
+                        text: 'Close',
+                        class: 'btn btn-primary'
+                    }
+                ]);
+            } else {
+                // Fallback to alert
+                alert(`Volume Report:\n${report.volume.formatted.m3.display}\nMethod: ${report.volume.estimation_method}\nConfidence: ${report.confidence.level}`);
+            }
+        }
+        
+        // Enhanced stats update function that includes 3D calibration status
+        if (window.StatsManager) {
+            const originalUpdateStats = window.StatsManager.updateStats;
+            window.StatsManager.updateStats = async function() {
+                await originalUpdateStats.call(this);
+                
+                // Update calibration status after stats update
+                updateCalibrationStatus();
+                
+                // Get current stats for confidence display
+                try {
+                    const stats = await window.Utils.apiCall('/api/stats');
+                    if (!stats.error) {
+                        updateConfidenceDisplay(stats);
+                    }
+                } catch (error) {
+                    console.warn('Could not update confidence display:', error);
+                }
+            };
+        }
+        
+        // Enhanced volume display update
+        if (window.StatsManager) {
+            const originalUpdateVolumeDisplay = window.StatsManager.updateVolumeDisplay;
+            window.StatsManager.updateVolumeDisplay = function(volume) {
+                originalUpdateVolumeDisplay.call(this, volume);
+                updateVolumeDisplay(volume);
+            };
+        }
+        
+        // Initialize enhanced UI when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            // Update calibration status on load
+            setTimeout(updateCalibrationStatus, 1000);
+            
+            // Set up periodic calibration status updates
+            setInterval(updateCalibrationStatus, 5000);
+        });
+    </script>
 </body>
 </html>

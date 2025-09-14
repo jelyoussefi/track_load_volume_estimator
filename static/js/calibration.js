@@ -1,13 +1,28 @@
 /**
- * Calibration management for the Dual Camera YOLO application
+ * Enhanced Calibration management for the Dual Camera YOLO application
+ * Now includes camera height and distance-to-corner measurements for 3D volume calculation
  */
 
 window.CalibrationManager = {
     
-    // Calibration state
+    // Enhanced calibration state
     calibrationData: {
-        camera1: { points: [], distances: [], isCalibrating: false, pixelsPerMeter: null },
-        camera2: { points: [], distances: [], isCalibrating: false, pixelsPerMeter: null }
+        camera1: { 
+            points: [], 
+            distances: [], 
+            isCalibrating: false, 
+            pixelsPerMeter: null,
+            cameraHeight: null,
+            cornerDistances: [] // Distance from camera to each corner
+        },
+        camera2: { 
+            points: [], 
+            distances: [], 
+            isCalibrating: false, 
+            pixelsPerMeter: null,
+            cameraHeight: null,
+            cornerDistances: [] // Distance from camera to each corner
+        }
     },
     
     /**
@@ -16,7 +31,7 @@ window.CalibrationManager = {
     init() {
         this.setupCanvases();
         this.loadCalibrationData();
-        console.log('Calibration manager initialized');
+        console.log('Enhanced calibration manager initialized with 3D capabilities');
     },
     
     /**
@@ -84,8 +99,53 @@ window.CalibrationManager = {
      * @param {number} cameraId - Camera ID (1 or 2)
      */
     startCalibration(cameraId) {
-        console.log(`Starting calibration for camera ${cameraId}`);
+        console.log(`Starting enhanced 3D calibration for camera ${cameraId}`);
         
+        // First collect camera height
+        this.collectCameraHeight(cameraId);
+    },
+    
+    /**
+     * Collect camera height information
+     * @param {number} cameraId - Camera ID (1 or 2)
+     */
+    collectCameraHeight(cameraId) {
+        const height = prompt(`Camera ${cameraId} Setup:\n\nEnter the height of Camera ${cameraId} above the truck bed (in meters):\n\nThis is the vertical distance from the camera lens to the truck bed surface.`);
+        
+        if (height === null) {
+            // User cancelled
+            if (window.Utils) {
+                window.Utils.showNotification('Calibration cancelled', 'info');
+            }
+            return;
+        }
+        
+        const isValid = window.Utils ? window.Utils.isValidPositiveNumber(height) : (!isNaN(parseFloat(height)) && parseFloat(height) > 0);
+        
+        if (!isValid) {
+            if (window.Utils) {
+                window.Utils.showNotification('Please enter a valid positive number for camera height', 'error');
+            }
+            this.collectCameraHeight(cameraId); // Retry
+            return;
+        }
+        
+        const meters = parseFloat(height);
+        this.calibrationData[`camera${cameraId}`].cameraHeight = meters;
+        
+        if (window.Utils) {
+            window.Utils.showNotification(`Camera ${cameraId} height set to ${meters}m. Starting area calibration...`, 'success');
+        }
+        
+        // Now proceed with area calibration
+        this.startAreaCalibration(cameraId);
+    },
+    
+    /**
+     * Start area calibration after height is collected
+     * @param {number} cameraId - Camera ID (1 or 2)
+     */
+    startAreaCalibration(cameraId) {
         // Pause video processing FIRST before any UI changes
         if (window.ProcessingManager) {
             window.ProcessingManager.pauseForCalibration();
@@ -107,11 +167,14 @@ window.CalibrationManager = {
         const info = document.getElementById(`calibrationInfo${cameraId}`);
         const button = document.querySelector(`.camera-feed:nth-child(${cameraId}) .btn-calibrate`);
         
-        // Reset calibration data
+        // Reset calibration data (but keep camera height)
+        const savedHeight = calibData.cameraHeight;
         calibData.points = [];
         calibData.distances = [];
+        calibData.cornerDistances = [];
         calibData.isCalibrating = true;
         calibData.pixelsPerMeter = null;
+        calibData.cameraHeight = savedHeight;
         
         // Ensure canvas is properly sized
         this.resizeCanvas(cameraId);
@@ -131,14 +194,14 @@ window.CalibrationManager = {
         
         // Show instruction for exactly 4 corners
         const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
-        info.textContent = `PAUSED: Click exactly ${requiredPoints} corners to create calibration rectangle.`;
+        info.textContent = `PAUSED: Click exactly ${requiredPoints} corners of the truck bed area. Camera height: ${savedHeight}m`;
         info.classList.add('show');
         
         if (window.Utils) {
-            window.Utils.showNotification(`Camera ${cameraId} calibration ready. Click 4 corners.`, 'info');
+            window.Utils.showNotification(`Camera ${cameraId} area calibration ready. Click 4 corners of truck bed.`, 'info');
         }
         
-        console.log(`Calibration UI ready for camera ${cameraId}`);
+        console.log(`Area calibration UI ready for camera ${cameraId} (height: ${savedHeight}m)`);
     },
     
     /**
@@ -155,7 +218,7 @@ window.CalibrationManager = {
         const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
         if (calibData.points.length >= requiredPoints) {
             if (window.Utils) {
-                window.Utils.showNotification('Rectangle complete. Collecting dimensions...', 'info');
+                window.Utils.showNotification('Rectangle complete. Collecting distance measurements...', 'info');
             }
             return;
         }
@@ -280,7 +343,7 @@ window.CalibrationManager = {
         const button = document.querySelector(`.camera-feed:nth-child(${cameraId}) .btn-calibrate`);
         if (button) {
             button.classList.remove('calibrating');
-            button.querySelector('.btn-text').textContent = 'Calibrate';
+            button.querySelector('.btn-text').textContent = '3D Calibrate';
         }
         
         // Resume video processing
@@ -288,13 +351,13 @@ window.CalibrationManager = {
             window.ProcessingManager.resumeAfterCalibration();
         }
         
-        // Auto-start dimension collection after a short delay
+        // Auto-start distance collection after a short delay
         setTimeout(() => {
-            this.collectDimensions(cameraId);
+            this.collectDistanceMeasurements(cameraId);
         }, 500);
         
         if (window.Utils) {
-            window.Utils.showNotification(`Rectangle complete for Camera ${cameraId}. Starting dimension collection...`, 'success');
+            window.Utils.showNotification(`Rectangle complete for Camera ${cameraId}. Starting distance collection...`, 'success');
         }
     },
     
@@ -308,17 +371,88 @@ window.CalibrationManager = {
         const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
         
         if (calibData.points.length < requiredPoints) {
-            info.textContent = `Point ${calibData.points.length}/${requiredPoints} added. ${requiredPoints - calibData.points.length} more needed.`;
+            info.textContent = `Point ${calibData.points.length}/${requiredPoints} added. Camera height: ${calibData.cameraHeight}m`;
         } else {
-            info.textContent = 'Rectangle complete! Starting dimension collection...';
+            info.textContent = 'Rectangle complete! Starting distance collection...';
         }
     },
     
     /**
-     * Collect real-world dimensions for calibration
+     * Collect distance measurements from camera to each corner
      * @param {number} cameraId - Camera ID (1 or 2)
      */
-    collectDimensions(cameraId) {
+    collectDistanceMeasurements(cameraId) {
+        const calibData = this.calibrationData[`camera${cameraId}`];
+        const points = calibData.points;
+        const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
+        
+        if (points.length !== requiredPoints) {
+            if (window.Utils) {
+                window.Utils.showNotification(`Need exactly ${requiredPoints} points for calibration`, 'error');
+            }
+            return;
+        }
+        
+        // Collect distance from camera to each corner
+        this.promptForCornerDistances(cameraId, 0);
+    },
+    
+    /**
+     * Prompt user for distance from camera to each corner
+     * @param {number} cameraId - Camera ID (1 or 2)
+     * @param {number} cornerIndex - Current corner index being processed
+     */
+    promptForCornerDistances(cameraId, cornerIndex) {
+        const calibData = this.calibrationData[`camera${cameraId}`];
+        const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
+        
+        if (cornerIndex >= requiredPoints) {
+            // All corner distances collected, now collect edge dimensions
+            this.collectEdgeDimensions(cameraId);
+            return;
+        }
+        
+        const cornerNumber = cornerIndex + 1;
+        const message = `Camera ${cameraId} Distance Measurement:\n\nEnter the straight-line distance from Camera ${cameraId} to Corner ${cornerNumber} in meters:\n\n(This is the 3D distance from the camera lens to the corner point on the truck bed)`;
+        
+        const distance = prompt(message);
+        
+        if (distance === null) {
+            // User cancelled
+            this.clearCalibration(cameraId);
+            return;
+        }
+        
+        const isValid = window.Utils ? window.Utils.isValidPositiveNumber(distance) : (!isNaN(parseFloat(distance)) && parseFloat(distance) > 0);
+        
+        if (!isValid) {
+            if (window.Utils) {
+                window.Utils.showNotification('Please enter a valid positive number', 'error');
+            }
+            this.promptForCornerDistances(cameraId, cornerIndex); // Retry same corner
+            return;
+        }
+        
+        const meters = parseFloat(distance);
+        
+        // Store the corner distance
+        calibData.cornerDistances.push({
+            cornerIndex: cornerIndex,
+            cornerNumber: cornerNumber,
+            distance: meters
+        });
+        
+        console.log(`Camera ${cameraId}, Corner ${cornerNumber}: ${meters}m`);
+        
+        // Continue with next corner
+        this.promptForCornerDistances(cameraId, cornerIndex + 1);
+    },
+    
+    /**
+     * Collect real-world dimensions for calibration edges
+     * @param {number} cameraId - Camera ID (1 or 2)
+     */
+    collectEdgeDimensions(cameraId) {
         const calibData = this.calibrationData[`camera${cameraId}`];
         const points = calibData.points;
         const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
@@ -343,8 +477,8 @@ window.CalibrationManager = {
             });
         }
         
-        // Start prompting for dimensions
-        this.promptForDimensions(cameraId, edges, 0);
+        // Start prompting for edge dimensions
+        this.promptForEdgeDimensions(cameraId, edges, 0);
     },
     
     /**
@@ -353,15 +487,15 @@ window.CalibrationManager = {
      * @param {Array} edges - Array of edge data
      * @param {number} edgeIndex - Current edge index being processed
      */
-    promptForDimensions(cameraId, edges, edgeIndex) {
+    promptForEdgeDimensions(cameraId, edges, edgeIndex) {
         if (edgeIndex >= edges.length) {
             // All dimensions collected, calculate calibration
-            this.calculateCalibration(cameraId);
+            this.calculateEnhancedCalibration(cameraId);
             return;
         }
         
         const edge = edges[edgeIndex];
-        const message = `Camera ${cameraId} - Enter the real-world length in meters for edge ${edge.from} → ${edge.to}:`;
+        const message = `Camera ${cameraId} Edge Measurement:\n\nEnter the real-world length of edge ${edge.from} → ${edge.to} in meters:\n\n(This is the actual distance along the truck bed surface)`;
         
         const dimension = prompt(message);
         
@@ -377,7 +511,7 @@ window.CalibrationManager = {
             if (window.Utils) {
                 window.Utils.showNotification('Please enter a valid positive number', 'error');
             }
-            this.promptForDimensions(cameraId, edges, edgeIndex); // Retry same edge
+            this.promptForEdgeDimensions(cameraId, edges, edgeIndex); // Retry same edge
             return;
         }
         
@@ -391,20 +525,22 @@ window.CalibrationManager = {
         });
         
         // Continue with next edge
-        this.promptForDimensions(cameraId, edges, edgeIndex + 1);
+        this.promptForEdgeDimensions(cameraId, edges, edgeIndex + 1);
     },
     
     /**
-     * Calculate calibration from collected dimensions
+     * Calculate enhanced calibration from collected measurements
      * @param {number} cameraId - Camera ID (1 or 2)
      */
-    calculateCalibration(cameraId) {
+    calculateEnhancedCalibration(cameraId) {
         const calibData = this.calibrationData[`camera${cameraId}`];
         const distances = calibData.distances;
+        const cornerDistances = calibData.cornerDistances;
+        const cameraHeight = calibData.cameraHeight;
         
-        if (distances.length === 0) {
+        if (distances.length === 0 || cornerDistances.length === 0 || !cameraHeight) {
             if (window.Utils) {
-                window.Utils.showNotification('No dimensions provided', 'error');
+                window.Utils.showNotification('Incomplete calibration data', 'error');
             }
             return;
         }
@@ -435,24 +571,113 @@ window.CalibrationManager = {
             this.calculatePolygonAreaFallback(calibData.points);
         const areaSquareMeters = areaPixels / (calibData.pixelsPerMeter * calibData.pixelsPerMeter);
         
+        // Calculate 3D calibration data
+        const calibration3D = this.calculate3DCalibration(calibData);
+        
         // Update display
         const info = document.getElementById(`calibrationInfo${cameraId}`);
         const formatNumber = window.Utils ? window.Utils.formatNumber : ((num, dec = 2) => num.toFixed(dec));
-        info.textContent = `Calibrated: ${formatNumber(areaSquareMeters)} m² | ${formatNumber(calibData.pixelsPerMeter, 1)} px/m`;
+        info.textContent = `3D Calibrated: ${formatNumber(areaSquareMeters)} m² | H:${formatNumber(cameraHeight)}m | ${formatNumber(calibData.pixelsPerMeter, 1)} px/m`;
         info.classList.add('show');
         
         // Save calibration data
         this.saveCalibrationData();
         
-        console.log(`Camera ${cameraId} calibrated:`, {
+        console.log(`Camera ${cameraId} 3D calibrated:`, {
             pixelsPerMeter: calibData.pixelsPerMeter,
             areaSquareMeters: areaSquareMeters,
-            points: calibData.points.length
+            cameraHeight: cameraHeight,
+            cornerDistances: cornerDistances.length,
+            calibration3D: calibration3D
         });
         
         if (window.Utils) {
-            window.Utils.showNotification(`Camera ${cameraId} calibrated successfully!`, 'success');
+            window.Utils.showNotification(`Camera ${cameraId} 3D calibration complete!`, 'success');
         }
+    },
+    
+    /**
+     * Calculate 3D calibration parameters using camera height and corner distances
+     * @param {Object} calibData - Calibration data
+     * @returns {Object} 3D calibration parameters
+     */
+    calculate3DCalibration(calibData) {
+        const { cameraHeight, cornerDistances, points } = calibData;
+        
+        if (!cameraHeight || cornerDistances.length !== 4 || points.length !== 4) {
+            return null;
+        }
+        
+        // Calculate 3D positions of corners
+        const corners3D = cornerDistances.map((cornerDist, index) => {
+            const point2D = points[index];
+            const distance3D = cornerDist.distance;
+            
+            // Calculate horizontal distance from camera using Pythagorean theorem
+            const horizontalDistance = Math.sqrt(distance3D * distance3D - cameraHeight * cameraHeight);
+            
+            return {
+                cornerIndex: index + 1,
+                distance3D: distance3D,
+                horizontalDistance: horizontalDistance,
+                pixelX: point2D.x,
+                pixelY: point2D.y,
+                // Estimated 3D coordinates (relative to camera)
+                x3D: horizontalDistance * Math.cos(index * Math.PI / 2), // Simplified assumption
+                y3D: horizontalDistance * Math.sin(index * Math.PI / 2), // Simplified assumption
+                z3D: -cameraHeight // Negative because truck bed is below camera
+            };
+        });
+        
+        return {
+            cameraHeight: cameraHeight,
+            corners3D: corners3D,
+            averageHorizontalDistance: corners3D.reduce((sum, c) => sum + c.horizontalDistance, 0) / corners3D.length,
+            calibrationQuality: this.assessCalibrationQuality(corners3D)
+        };
+    },
+    
+    /**
+     * Assess the quality of 3D calibration
+     * @param {Array} corners3D - 3D corner data
+     * @returns {Object} Quality assessment
+     */
+    assessCalibrationQuality(corners3D) {
+        if (corners3D.length !== 4) {
+            return { quality: 'poor', issues: ['Insufficient corner data'] };
+        }
+        
+        const distances = corners3D.map(c => c.horizontalDistance);
+        const avgDistance = distances.reduce((sum, d) => sum + d, 0) / distances.length;
+        const maxDeviation = Math.max(...distances.map(d => Math.abs(d - avgDistance)));
+        const deviationPercent = (maxDeviation / avgDistance) * 100;
+        
+        let quality = 'excellent';
+        let issues = [];
+        
+        if (deviationPercent > 30) {
+            quality = 'poor';
+            issues.push('Large variation in corner distances suggests measurement errors');
+        } else if (deviationPercent > 15) {
+            quality = 'fair';
+            issues.push('Moderate variation in corner distances');
+        } else if (deviationPercent > 5) {
+            quality = 'good';
+        }
+        
+        // Check for reasonable distances
+        if (avgDistance < 1.0) {
+            issues.push('Camera appears very close to truck bed');
+        } else if (avgDistance > 20.0) {
+            issues.push('Camera appears very far from truck bed');
+        }
+        
+        return {
+            quality: quality,
+            deviationPercent: deviationPercent,
+            averageDistance: avgDistance,
+            issues: issues
+        };
     },
     
     /**
@@ -485,8 +710,10 @@ window.CalibrationManager = {
         // Reset data
         calibData.points = [];
         calibData.distances = [];
+        calibData.cornerDistances = [];
         calibData.isCalibrating = false;
         calibData.pixelsPerMeter = null;
+        calibData.cameraHeight = null;
         
         // Clear canvas
         const ctx = canvas.getContext('2d');
@@ -498,7 +725,7 @@ window.CalibrationManager = {
         // Reset button appearance
         if (button) {
             button.classList.remove('calibrating');
-            button.querySelector('.btn-text').textContent = 'Calibrate';
+            button.querySelector('.btn-text').textContent = '3D Calibrate';
         }
         
         // Hide info
@@ -512,7 +739,7 @@ window.CalibrationManager = {
         // Save calibration data
         this.saveCalibrationData();
         
-        console.log(`Cleared calibration for camera ${cameraId}`);
+        console.log(`Cleared enhanced calibration for camera ${cameraId}`);
         if (window.Utils) {
             window.Utils.showNotification(`Camera ${cameraId} calibration cleared`, 'info');
         }
@@ -528,7 +755,7 @@ window.CalibrationManager = {
         const info = document.getElementById(`calibrationInfo${cameraId}`);
         const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
         
-        if (calibData.points.length === requiredPoints && calibData.pixelsPerMeter) {
+        if (calibData.points.length === requiredPoints && calibData.pixelsPerMeter && calibData.cameraHeight) {
             const ctx = canvas.getContext('2d');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
@@ -585,8 +812,15 @@ window.CalibrationManager = {
             ctx.closePath();
             ctx.stroke();
             
-            // Update info - don't show calibration details, just hide info
-            info.classList.remove('show'); // Keep calibration info hidden
+            // Show calibration info with 3D data
+            const areaPixels = window.Utils ? 
+                window.Utils.calculatePolygonArea(calibData.points) : 
+                this.calculatePolygonAreaFallback(calibData.points);
+            const areaSquareMeters = areaPixels / (calibData.pixelsPerMeter * calibData.pixelsPerMeter);
+            const formatNumber = window.Utils ? window.Utils.formatNumber : ((num, dec = 2) => num.toFixed(dec));
+            
+            info.textContent = `3D Calibrated: ${formatNumber(areaSquareMeters)} m² | H:${formatNumber(calibData.cameraHeight)}m`;
+            info.classList.add('show');
         }
     },
     
@@ -616,10 +850,12 @@ window.CalibrationManager = {
                     if (this.calibrationData[key]) {
                         this.calibrationData[key].points = loaded[key].points || [];
                         this.calibrationData[key].distances = loaded[key].distances || [];
+                        this.calibrationData[key].cornerDistances = loaded[key].cornerDistances || [];
                         this.calibrationData[key].pixelsPerMeter = loaded[key].pixelsPerMeter || null;
+                        this.calibrationData[key].cameraHeight = loaded[key].cameraHeight || null;
                     }
                 }
-                console.log('Loaded calibration data from localStorage');
+                console.log('Loaded enhanced calibration data from localStorage');
                 
                 // Redraw calibration polygons after a delay to ensure canvases are ready
                 const delay = window.CONFIG ? window.CONFIG.TIMING.CALIBRATION_REDRAW_DELAY : 1000;
@@ -634,29 +870,29 @@ window.CalibrationManager = {
     },
     
     /**
-     * Export calibration data to file
+     * Export enhanced calibration data to file
      */
     exportCalibration() {
         const data = JSON.stringify(this.calibrationData, null, 2);
-        console.log('Calibration data:', data);
+        console.log('Enhanced calibration data:', data);
         
         const blob = new Blob([data], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'truck-volume-calibration.json';
+        a.download = 'truck-volume-3d-calibration.json';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
         if (window.Utils) {
-            window.Utils.showNotification('Calibration data exported', 'success');
+            window.Utils.showNotification('3D calibration data exported', 'success');
         }
     },
     
     /**
-     * Import calibration data from file
+     * Import enhanced calibration data from file
      */
     importCalibration() {
         const input = document.createElement('input');
@@ -678,9 +914,9 @@ window.CalibrationManager = {
                         }, 500);
                         
                         if (window.Utils) {
-                            window.Utils.showNotification('Calibration data imported successfully', 'success');
+                            window.Utils.showNotification('3D calibration data imported successfully', 'success');
                         }
-                        console.log('Imported calibration data:', this.calibrationData);
+                        console.log('Imported enhanced calibration data:', this.calibrationData);
                     } catch (error) {
                         if (window.Utils) {
                             window.Utils.showNotification('Failed to import calibration data', 'error');
@@ -698,10 +934,24 @@ window.CalibrationManager = {
      * Reset all calibration data
      */
     resetCalibration() {
-        if (confirm('Reset all calibration data? This cannot be undone.')) {
+        if (confirm('Reset all 3D calibration data? This cannot be undone.')) {
             this.calibrationData = {
-                camera1: { points: [], distances: [], isCalibrating: false, pixelsPerMeter: null },
-                camera2: { points: [], distances: [], isCalibrating: false, pixelsPerMeter: null }
+                camera1: { 
+                    points: [], 
+                    distances: [], 
+                    cornerDistances: [],
+                    isCalibrating: false, 
+                    pixelsPerMeter: null,
+                    cameraHeight: null
+                },
+                camera2: { 
+                    points: [], 
+                    distances: [], 
+                    cornerDistances: [],
+                    isCalibrating: false, 
+                    pixelsPerMeter: null,
+                    cameraHeight: null
+                }
             };
             
             // Clear canvases
@@ -722,7 +972,7 @@ window.CalibrationManager = {
             // Reset button states
             document.querySelectorAll('.btn-calibrate').forEach(btn => {
                 btn.classList.remove('calibrating');
-                btn.querySelector('.btn-text').textContent = 'Calibrate';
+                btn.querySelector('.btn-text').textContent = '3D Calibrate';
             });
             
             // Resume video processing
@@ -732,9 +982,9 @@ window.CalibrationManager = {
             
             this.saveCalibrationData();
             if (window.Utils) {
-                window.Utils.showNotification('All calibration data reset', 'info');
+                window.Utils.showNotification('All 3D calibration data reset', 'info');
             }
-            console.log('All calibration data reset');
+            console.log('All enhanced calibration data reset');
         }
     },
     
@@ -761,23 +1011,91 @@ window.CalibrationManager = {
     },
     
     /**
-     * Get calibration data for a specific camera
+     * Get enhanced calibration data for a specific camera
      * @param {number} cameraId - Camera ID (1 or 2)
-     * @returns {Object} Calibration data for the camera
+     * @returns {Object} Enhanced calibration data for the camera
      */
     getCalibrationData(cameraId) {
         return this.calibrationData[`camera${cameraId}`];
     },
     
     /**
-     * Check if a camera is calibrated
+     * Get 3D calibration data for volume calculations
+     * @param {number} cameraId - Camera ID (1 or 2)
+     * @returns {Object} 3D calibration data or null
+     */
+    get3DCalibrationData(cameraId) {
+        const calibData = this.calibrationData[`camera${cameraId}`];
+        if (calibData.cameraHeight && calibData.cornerDistances.length === 4) {
+            return this.calculate3DCalibration(calibData);
+        }
+        return null;
+    },
+    
+    /**
+     * Check if a camera is fully calibrated (including 3D data)
      * @param {number} cameraId - Camera ID (1 or 2) 
-     * @returns {boolean} True if camera is calibrated
+     * @returns {boolean} True if camera is fully calibrated
      */
     isCalibrated(cameraId) {
         const calibData = this.calibrationData[`camera${cameraId}`];
         const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
+        return !!(
+            calibData.pixelsPerMeter && 
+            calibData.points.length === requiredPoints &&
+            calibData.cameraHeight &&
+            calibData.cornerDistances.length === requiredPoints
+        );
+    },
+    
+    /**
+     * Check if a camera has basic 2D calibration
+     * @param {number} cameraId - Camera ID (1 or 2)
+     * @returns {boolean} True if camera has basic calibration
+     */
+    hasBasicCalibration(cameraId) {
+        const calibData = this.calibrationData[`camera${cameraId}`];
+        const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
         return !!(calibData.pixelsPerMeter && calibData.points.length === requiredPoints);
+    },
+    
+    /**
+     * Check if a camera has 3D calibration data
+     * @param {number} cameraId - Camera ID (1 or 2)
+     * @returns {boolean} True if camera has 3D calibration
+     */
+    has3DCalibration(cameraId) {
+        const calibData = this.calibrationData[`camera${cameraId}`];
+        const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
+        return !!(
+            calibData.cameraHeight &&
+            calibData.cornerDistances.length === requiredPoints
+        );
+    },
+    
+    /**
+     * Get calibration summary for debugging
+     * @returns {Object} Summary of all calibration data
+     */
+    getCalibrationSummary() {
+        const summary = {};
+        
+        for (let cameraId = 1; cameraId <= 2; cameraId++) {
+            const calibData = this.calibrationData[`camera${cameraId}`];
+            const calib3D = this.get3DCalibrationData(cameraId);
+            
+            summary[`camera${cameraId}`] = {
+                hasBasicCalibration: this.hasBasicCalibration(cameraId),
+                has3DCalibration: this.has3DCalibration(cameraId),
+                isFullyCalibrated: this.isCalibrated(cameraId),
+                cameraHeight: calibData.cameraHeight,
+                cornerCount: calibData.cornerDistances.length,
+                pixelsPerMeter: calibData.pixelsPerMeter,
+                calibrationQuality: calib3D ? calib3D.calibrationQuality : null
+            };
+        }
+        
+        return summary;
     },
     
     /**
@@ -788,7 +1106,7 @@ window.CalibrationManager = {
         const calibData = this.calibrationData[`camera${cameraId}`];
         const requiredPoints = window.CONFIG ? window.CONFIG.CALIBRATION.REQUIRED_POINTS : 4;
         
-        // Only allow early finish if we have exactly 4 points (shouldn't happen with new flow)
+        // Only allow early finish if we have exactly 4 points
         if (calibData.points.length !== requiredPoints) {
             if (window.Utils) {
                 window.Utils.showNotification(`Need exactly ${requiredPoints} points. Currently have ${calibData.points.length}. Continue clicking corners.`, 'error');
@@ -796,54 +1114,7 @@ window.CalibrationManager = {
             return;
         }
         
-        // This function now mainly serves as a fallback
-        const canvas = document.getElementById(`canvas${cameraId}`);
-        const info = document.getElementById(`calibrationInfo${cameraId}`);
-        const button = document.querySelector(`.camera-feed:nth-child(${cameraId}) .btn-calibrate`);
-        
-        // Close the rectangle if not already closed
-        const ctx = canvas.getContext('2d');
-        const firstPoint = calibData.points[0];
-        const lastPoint = calibData.points[requiredPoints - 1];
-        
-        const colors = window.CONFIG ? window.CONFIG.COLORS : {
-            LINE_COLOR: '#4ecdc4',
-            FILL_COLOR: 'rgba(255, 0, 0, 0.3)'
-        };
-        
-        ctx.strokeStyle = colors.LINE_COLOR;
-        ctx.lineWidth = window.CONFIG ? window.CONFIG.CALIBRATION.LINE_WIDTH : 3;
-        ctx.beginPath();
-        ctx.moveTo(lastPoint.x, lastPoint.y);
-        ctx.lineTo(firstPoint.x, firstPoint.y);
-        ctx.stroke();
-        
-        // Fill the rectangle with red transparent color
-        ctx.fillStyle = colors.FILL_COLOR;
-        ctx.beginPath();
-        ctx.moveTo(calibData.points[0].x, calibData.points[0].y);
-        for (let i = 1; i < calibData.points.length; i++) {
-            ctx.lineTo(calibData.points[i].x, calibData.points[i].y);
-        }
-        ctx.closePath();
-        ctx.fill();
-        
-        // Deactivate canvas
-        canvas.classList.remove('active');
-        calibData.isCalibrating = false;
-        
-        // Reset button appearance
-        if (button) {
-            button.classList.remove('calibrating');
-            button.querySelector('.btn-text').textContent = 'Calibrate';
-        }
-        
-        // Resume video processing
-        if (window.ProcessingManager) {
-            window.ProcessingManager.resumeAfterCalibration();
-        }
-        
-        // Start dimension collection
-        this.collectDimensions(cameraId);
+        // Complete the shape and start measurements
+        this.completeCalibrationShape(cameraId);
     }
 };
