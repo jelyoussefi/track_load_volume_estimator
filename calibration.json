@@ -1,0 +1,32 @@
+{
+  "edge_distances": {
+    "D12": 24.6,
+    "D13": 24.75,
+    "D14": 35.0,
+    "D23": 8.15,
+    "D24": 26.15,
+    "D34": 23.55
+  },
+  "camera1": {
+    "height": 3.6,
+    "distances": {
+      "C1": 23,
+      "C2": 10.6,
+      "C3": 4.4,
+      "C4": 21.35
+    },
+    "visible_points": ["P1", "P2"],
+    "description": "Camera 1 - Top view (P1 and P2 visible)"
+  },
+  "camera2": {
+    "height": 3.6,
+    "distances": {
+      "C1": 21.2,
+      "C2": 5.1,
+      "C3": 10,
+      "C4": 23.3
+    },
+    "visible_points": ["P3", "P4"],
+    "description": "Camera 2 - Bottom view (P3 and P4 visible)"
+  }
+}

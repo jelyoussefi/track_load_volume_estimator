@@ -10,9 +10,10 @@ Features:
 - Volume estimation calculations
 - REST API endpoints
 - Processing pause/resume for calibration
+- Calibration config file support
 
 Author: AI Assistant
-Version: 1.2.0
+Version: 1.3.0
 """
 
 import os
@@ -36,6 +37,10 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Global calibration config
+calibration_config = None
+calibration_config_path = None
 
 class DualCameraYOLO:
     """Dual camera YOLO processing engine"""
@@ -462,6 +467,16 @@ def get_stats():
     else:
         return jsonify({'error': 'Processor not initialized or not running'})
 
+@app.route('/api/calibration/config')
+def get_calibration_config():
+    """Get calibration configuration"""
+    global calibration_config
+    
+    if calibration_config:
+        return jsonify(calibration_config)
+    else:
+        return jsonify({'error': 'No calibration config loaded'}), 404
+
 @app.route('/api/pause', methods=['POST'])
 def pause_processing():
     """Pause YOLO processing for calibration"""
@@ -561,6 +576,45 @@ def stop_processing():
         logger.error(f"Failed to stop processing: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/api/calibration/save', methods=['POST'])
+def save_calibration():
+    """Save calibration data to file"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': 'No data provided'}), 400
+        
+        # Save to calibration_data.json file
+        save_path = './calibration_data.json'
+        with open(save_path, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        logger.info(f"Calibration data saved to {save_path}")
+        return jsonify({'status': 'success', 'message': 'Calibration saved', 'path': save_path})
+    
+    except Exception as e:
+        logger.error(f"Failed to save calibration: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/calibration/load', methods=['GET'])
+def load_calibration():
+    """Load calibration data from file"""
+    try:
+        load_path = './calibration_data.json'
+        
+        if not os.path.exists(load_path):
+            return jsonify({'status': 'error', 'message': 'No saved calibration found'}), 404
+        
+        with open(load_path, 'r') as f:
+            data = json.load(f)
+        
+        logger.info(f"Calibration data loaded from {load_path}")
+        return jsonify(data)
+    
+    except Exception as e:
+        logger.error(f"Failed to load calibration: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 # Health check endpoint
 @app.route('/health')
 def health_check():
@@ -568,8 +622,36 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'timestamp': time.time(),
-        'version': '1.2.0'
+        'version': '1.3.0',
+        'calibration_loaded': calibration_config is not None
     })
+
+def load_calibration_config(config_path: str) -> Optional[Dict]:
+    """Load calibration configuration from JSON file"""
+    try:
+        if not os.path.exists(config_path):
+            logger.warning(f"Calibration config file not found: {config_path}")
+            return None
+        
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        # Validate config structure
+        required_keys = ['edge_distances', 'camera1', 'camera2']
+        if not all(key in config for key in required_keys):
+            logger.error(f"Invalid calibration config: missing required keys")
+            return None
+        
+        logger.info(f"Loaded calibration config from {config_path}")
+        logger.info(f"  Edge distances: {config['edge_distances']}")
+        logger.info(f"  Camera 1: H={config['camera1']['height']}m, visible={config['camera1']['visible_points']}")
+        logger.info(f"  Camera 2: H={config['camera2']['height']}m, visible={config['camera2']['visible_points']}")
+        
+        return config
+    
+    except Exception as e:
+        logger.error(f"Failed to load calibration config: {e}")
+        return None
 
 if __name__ == '__main__':
     import argparse
@@ -583,12 +665,20 @@ if __name__ == '__main__':
     parser.add_argument('--conf', type=float, default=0.5, help='Confidence threshold')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     parser.add_argument('--no-auto-start', action='store_true', help='Disable auto-start processing')
+    parser.add_argument('--calibration-config', default='./calibration.json', help='Path to calibration config JSON file')
     
     args = parser.parse_args()
     
     # Set debug logging level
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Load calibration config
+    calibration_config_path = args.calibration_config
+    calibration_config = load_calibration_config(calibration_config_path)
+    
+    if calibration_config is None:
+        logger.warning("Starting without calibration config - manual calibration will be required")
     
     # Auto-start processing if sources provided and not disabled
     if not args.no_auto_start and args.model and os.path.exists(args.model):

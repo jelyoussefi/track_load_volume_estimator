@@ -1,10 +1,12 @@
 /**
  * Enhanced Calibration management for the Dual Camera YOLO application
- * WITH VIEWPORT ZOOMING for better precision during calibration
+ * Loads configuration from config file - no manual entry needed
  * Automatic P3/P4 calculation from P1, P2 and distance measurements
  */
 
 window.CalibrationManager = {
+    
+    calibrationConfig: null,  // Loaded from API
     
     calibrationData: {
         camera1: { 
@@ -15,8 +17,9 @@ window.CalibrationManager = {
             pixelsPerMeter: null,
             cameraHeight: null,
             redrawInterval: null,
-            calibrationCanvasWidth: null,  // Canvas width during calibration
-            calibrationCanvasHeight: null  // Canvas height during calibration
+            calibrationCanvasWidth: null,
+            calibrationCanvasHeight: null,
+            visiblePoints: ['P1', 'P2']  // Default
         },
         camera2: { 
             points: [],
@@ -26,15 +29,67 @@ window.CalibrationManager = {
             pixelsPerMeter: null,
             cameraHeight: null,
             redrawInterval: null,
-            calibrationCanvasWidth: null,  // Canvas width during calibration
-            calibrationCanvasHeight: null  // Canvas height during calibration
+            calibrationCanvasWidth: null,
+            calibrationCanvasHeight: null,
+            visiblePoints: ['P3', 'P4']  // Default
         }
     },
     
-    init() {
+    async init() {
+        await this.loadCalibrationConfig();
         this.setupCanvases();
-        this.loadCalibrationData();
-        console.log('Enhanced calibration manager initialized with automatic P3/P4 calculation and viewport zooming');
+        await this.loadCalibrationData();
+        console.log('Enhanced calibration manager initialized with config-based calibration');
+    },
+    
+    async loadCalibrationConfig() {
+        console.log('=== LOADING CALIBRATION CONFIG ===');
+        try {
+            console.log('Fetching calibration config from /api/calibration/config...');
+            const response = await fetch('/api/calibration/config');
+            console.log('Config response status:', response.status, response.statusText);
+            
+            if (response.ok) {
+                this.calibrationConfig = await response.json();
+                console.log('✓ Calibration config loaded successfully:', this.calibrationConfig);
+                
+                // Update calibration data with config values
+                if (this.calibrationConfig.camera1) {
+                    console.log('Processing camera1 config:', this.calibrationConfig.camera1);
+                    this.calibrationData.camera1.cameraHeight = this.calibrationConfig.camera1.height;
+                    this.calibrationData.camera1.edgeDistances = this.calibrationConfig.edge_distances;
+                    this.calibrationData.camera1.cameraDistances = this.calibrationConfig.camera1.distances;
+                    this.calibrationData.camera1.visiblePoints = this.calibrationConfig.camera1.visible_points || ['P1', 'P2'];
+                    console.log('✓ Camera1 data updated:', {
+                        height: this.calibrationData.camera1.cameraHeight,
+                        edgeDistances: this.calibrationData.camera1.edgeDistances,
+                        cameraDistances: this.calibrationData.camera1.cameraDistances,
+                        visiblePoints: this.calibrationData.camera1.visiblePoints
+                    });
+                }
+                
+                if (this.calibrationConfig.camera2) {
+                    console.log('Processing camera2 config:', this.calibrationConfig.camera2);
+                    this.calibrationData.camera2.cameraHeight = this.calibrationConfig.camera2.height;
+                    this.calibrationData.camera2.edgeDistances = this.calibrationConfig.edge_distances;
+                    this.calibrationData.camera2.cameraDistances = this.calibrationConfig.camera2.distances;
+                    this.calibrationData.camera2.visiblePoints = this.calibrationConfig.camera2.visible_points || ['P3', 'P4'];
+                    console.log('✓ Camera2 data updated:', {
+                        height: this.calibrationData.camera2.cameraHeight,
+                        edgeDistances: this.calibrationData.camera2.edgeDistances,
+                        cameraDistances: this.calibrationData.camera2.cameraDistances,
+                        visiblePoints: this.calibrationData.camera2.visiblePoints
+                    });
+                }
+                console.log('=== CONFIG LOADING COMPLETE ===');
+            } else {
+                console.warn('⚠ No calibration config available from server (status:', response.status, ')');
+                console.log('=== CONFIG LOADING FAILED ===');
+            }
+        } catch (error) {
+            console.error('✗ Failed to load calibration config:', error);
+            console.log('=== CONFIG LOADING ERROR ===');
+        }
     },
     
     setupCanvases() {
@@ -92,17 +147,14 @@ window.CalibrationManager = {
             canvas.width = img.offsetWidth;
             canvas.height = img.offsetHeight;
             
-            // Ensure canvas is always visible
             canvas.style.display = 'block';
             canvas.style.zIndex = '10';
             
-            // Scale calibration points if canvas size changed and we have calibration points
             const calibData = this.calibrationData[`camera${cameraId}`];
             if (calibData.points.length > 0 && oldWidth > 0 && oldHeight > 0) {
                 const scaleX = canvas.width / oldWidth;
                 const scaleY = canvas.height / oldHeight;
                 
-                // Only scale if the size change is significant (more than 5% difference)
                 if (Math.abs(scaleX - 1.0) > 0.05 || Math.abs(scaleY - 1.0) > 0.05) {
                     calibData.points = calibData.points.map(point => ({
                         x: point.x * scaleX,
@@ -113,11 +165,11 @@ window.CalibrationManager = {
                 }
             }
             
-            // Always redraw if we have complete calibration
             if (calibData.points.length === 4 && calibData.pixelsPerMeter) {
+                console.log(`[RESIZE] Canvas ${cameraId} has calibration - redrawing polygon after resize`);
                 setTimeout(() => {
                     this.drawCompleteCalibrationPolygon(cameraId);
-                }, 50);
+                }, 100); // Increased delay to 100ms
             }
             
             console.log(`Canvas ${cameraId} resized to ${canvas.width}x${canvas.height}`);
@@ -125,89 +177,48 @@ window.CalibrationManager = {
     },
     
     startCalibration(cameraId) {
-        console.log(`Starting enhanced 3D calibration with ZOOM for camera ${cameraId}`);
+        console.log(`Starting config-based 3D calibration for camera ${cameraId}`);
+        
+        if (!this.calibrationConfig) {
+            if (window.Utils) {
+                window.Utils.showNotification('No calibration config loaded. Please ensure calibration.json is configured.', 'error');
+            }
+            return;
+        }
         
         if (window.ProcessingManager) {
             window.ProcessingManager.pauseForCalibration();
         }
         
         setTimeout(() => {
-            this.startP1P2Placement(cameraId);
+            this.startPointPlacement(cameraId);
         }, 200);
     },
     
-    collectCameraHeight(cameraId, callback) {
-        const height = prompt(
-            `Camera ${cameraId} Height:\n\n` +
-            `Enter the height of Camera ${cameraId} above the GROUND (in meters):\n\n` +
-            `Press Cancel to abort calibration.`
-        );
-        
-        if (height === null) {
-            if (window.Utils) {
-                window.Utils.showNotification('Calibration cancelled', 'info');
-            }
-            return;
-        }
-        
-        const isValid = window.Utils ? 
-            window.Utils.isValidPositiveNumber(height) : 
-            (!isNaN(parseFloat(height)) && parseFloat(height) > 0);
-        
-        if (!isValid) {
-            if (window.Utils) {
-                window.Utils.showNotification('Please enter a valid positive number for camera height', 'error');
-            }
-            this.collectCameraHeight(cameraId, callback);
-            return;
-        }
-        
-        const cameraHeight = parseFloat(height);
-        
-        // Store the camera height directly as entered
-        this.calibrationData[`camera${cameraId}`].cameraHeight = cameraHeight;
-        
-        if (window.Utils) {
-            window.Utils.showNotification(
-                `Camera ${cameraId}: Height set to ${cameraHeight.toFixed(2)}m from ground`,
-                'success'
-            );
-        }
-        
-        if (callback) callback();
-    },
-    
-    startP1P2Placement(cameraId) {
+    startPointPlacement(cameraId) {
         const calibData = this.calibrationData[`camera${cameraId}`];
         const canvas = document.getElementById(`canvas${cameraId}`);
         const info = document.getElementById(`calibrationInfo${cameraId}`);
         const button = document.querySelector(`.camera-feed:nth-child(${cameraId}) .btn-calibrate`);
         
-        // Get container elements for zooming
         const cameraContainer = document.querySelector('.camera-container');
         const cameraFeed = document.querySelector(`.camera-feed:nth-child(${cameraId})`);
         
         calibData.points = [];
-        calibData.edgeDistances = null;
-        calibData.cameraDistances = null;
         calibData.isCalibrating = true;
         calibData.pixelsPerMeter = null;
         
-        // ENABLE ZOOM - Add calibrating classes for viewport zoom
+        // Enable zoom
         if (cameraContainer) {
             cameraContainer.classList.add('calibrating');
-            console.log('Added calibrating class to camera container for zoom');
         }
         if (cameraFeed) {
             cameraFeed.classList.add('calibrating-active');
-            console.log(`Camera feed ${cameraId} zoomed for calibration`);
         }
         
-        // Wait for zoom to take effect, then store canvas dimensions
         setTimeout(() => {
             calibData.calibrationCanvasWidth = canvas.width;
             calibData.calibrationCanvasHeight = canvas.height;
-            console.log(`Stored calibration canvas size: ${canvas.width}x${canvas.height}`);
         }, 100);
         
         const ctx = canvas.getContext('2d');
@@ -217,20 +228,21 @@ window.CalibrationManager = {
         
         if (button) {
             button.classList.add('calibrating');
-            button.querySelector('.btn-text').textContent = 'Place P1 & P2';
+            button.querySelector('.btn-text').textContent = 'Place Points';
         }
         
-        info.textContent = `PAUSED: Click P1 (top-left corner), then P2 (top-right corner). Press ESC to cancel.`;
+        const visiblePoints = calibData.visiblePoints.join(' and ');
+        info.textContent = `PAUSED: Click ${visiblePoints}. All measurements loaded from config. Press ESC to cancel.`;
         info.classList.add('show');
         
         if (window.Utils) {
             window.Utils.showNotification(
-                `Camera ${cameraId} ZOOMED: Click P1 (top-left) and P2 (top-right)`,
+                `Camera ${cameraId} ZOOMED: Click ${visiblePoints} (measurements from config)`,
                 'info'
             );
         }
         
-        console.log(`P1/P2 placement ready for camera ${cameraId} with ZOOM enabled`);
+        console.log(`Point placement ready for camera ${cameraId}: ${visiblePoints}`);
     },
     
     handleCanvasClick(event, cameraId) {
@@ -238,9 +250,10 @@ window.CalibrationManager = {
         
         if (!calibData.isCalibrating) return;
         
-        if (calibData.points.length >= 2) {
+        const expectedPoints = calibData.visiblePoints.length;
+        if (calibData.points.length >= expectedPoints) {
             if (window.Utils) {
-                window.Utils.showNotification('P1 and P2 already placed. Collecting distances...', 'info');
+                window.Utils.showNotification('All visible points already placed. Processing...', 'info');
             }
             return;
         }
@@ -257,39 +270,41 @@ window.CalibrationManager = {
         
         calibData.points.push({ x: scaledX, y: scaledY });
         
-        this.drawCalibrationPoint(canvas, scaledX, scaledY, calibData.points.length);
+        const pointIndex = calibData.points.length;
+        const pointName = calibData.visiblePoints[pointIndex - 1];
+        this.drawCalibrationPoint(canvas, scaledX, scaledY, pointName);
         
         const info = document.getElementById(`calibrationInfo${cameraId}`);
-        if (calibData.points.length === 1) {
-            info.textContent = 'P1 placed! Now click P2 (top-right corner)';
+        if (calibData.points.length < expectedPoints) {
+            const nextPoint = calibData.visiblePoints[pointIndex];
+            info.textContent = `${pointName} placed! Now click ${nextPoint}`;
             if (window.Utils) {
-                window.Utils.showNotification('P1 placed! Now click P2', 'success');
+                window.Utils.showNotification(`${pointName} placed! Now click ${nextPoint}`, 'success');
             }
-        } else if (calibData.points.length === 2) {
-            info.textContent = 'P1 and P2 placed! Collecting camera height...';
+        } else {
+            info.textContent = 'All visible points placed! Calculating remaining points...';
             
-            this.drawLineBetweenPoints(canvas, calibData.points[0], calibData.points[1]);
+            if (pointIndex >= 2) {
+                this.drawLineBetweenPoints(canvas, calibData.points[0], calibData.points[1]);
+            }
             
             canvas.classList.remove('active');
             
             if (window.Utils) {
-                window.Utils.showNotification('P1 and P2 placed! Collecting camera height...', 'success');
+                window.Utils.showNotification('All visible points placed! Calculating...', 'success');
             }
             
             setTimeout(() => {
-                this.collectCameraHeight(cameraId, () => {
-                    this.collectAllDistances(cameraId);
-                });
+                this.calculateRemainingPoints(cameraId);
             }, 500);
         }
         
-        console.log(`Added point ${calibData.points.length}/2 for camera ${cameraId}:`, { x: scaledX, y: scaledY });
+        console.log(`Added point ${pointName} for camera ${cameraId}:`, { x: scaledX, y: scaledY });
     },
     
-    drawCalibrationPoint(canvas, x, y, pointNumber) {
+    drawCalibrationPoint(canvas, x, y, pointLabel) {
         const ctx = canvas.getContext('2d');
         
-        // Draw point circle
         ctx.fillStyle = '#ff6b6b';
         ctx.beginPath();
         ctx.arc(x, y, 12, 0, 2 * Math.PI);
@@ -299,10 +314,8 @@ window.CalibrationManager = {
         ctx.lineWidth = 3;
         ctx.stroke();
         
-        // Draw label
         ctx.font = 'bold 18px Arial';
-        const label = `P${pointNumber}`;
-        const metrics = ctx.measureText(label);
+        const metrics = ctx.measureText(pointLabel);
         
         const padding = 6;
         const boxWidth = metrics.width + padding * 2;
@@ -310,7 +323,6 @@ window.CalibrationManager = {
         const boxX = x - boxWidth / 2;
         const boxY = y + 20;
         
-        // Label background
         ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
         ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
         
@@ -318,20 +330,9 @@ window.CalibrationManager = {
         ctx.lineWidth = 2;
         ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
         
-        // Label text
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
-        ctx.fillText(label, x, boxY + 17);
-        
-        // Add marker type indicator
-        ctx.font = 'bold 12px Arial';
-        if (pointNumber <= 2) {
-            ctx.fillStyle = '#ff6b6b';
-            ctx.fillText('(Manual)', x, boxY + 40);
-        } else {
-            ctx.fillStyle = '#4ecdc4';
-            ctx.fillText('(Calculated)', x, boxY + 40);
-        }
+        ctx.fillText(pointLabel, x, boxY + 17);
     },
     
     drawLineBetweenPoints(canvas, p1, p2) {
@@ -344,225 +345,61 @@ window.CalibrationManager = {
         ctx.stroke();
     },
     
-    collectAllDistances(cameraId) {
-        const distances = {};
-        
-        const edgeLabels = [
-            { key: 'D12', description: 'P1 to P2 (top edge, along truck bed)' },
-            { key: 'D13', description: 'P1 to P3 (left edge, along truck bed)' },
-            { key: 'D23', description: 'P2 to P3 (diagonal, along truck bed)' },
-            { key: 'D24', description: 'P2 to P4 (right edge, along truck bed)' },
-            { key: 'D34', description: 'P3 to P4 (bottom edge, along truck bed)' }
-        ];
-        
-        this.promptForEdgeDistance(cameraId, edgeLabels, 0, distances);
-    },
-    
-    promptForEdgeDistance(cameraId, labels, index, distances) {
-        if (index >= labels.length) {
-            this.collectCameraDistances(cameraId, distances);
-            return;
-        }
-        
-        const label = labels[index];
-        const distance = prompt(
-            `Camera ${cameraId} - Distance ${label.key}:\n\n` +
-            `Enter distance ${label.description} in meters:\n\n` +
-            `Press Cancel to abort calibration.`
-        );
-        
-        if (distance === null) {
-            this.clearCalibration(cameraId);
-            if (window.Utils) {
-                window.Utils.showNotification('Calibration cancelled', 'info');
-            }
-            return;
-        }
-        
-        const isValid = window.Utils ? 
-            window.Utils.isValidPositiveNumber(distance) : 
-            (!isNaN(parseFloat(distance)) && parseFloat(distance) > 0);
-        
-        if (!isValid) {
-            if (window.Utils) {
-                window.Utils.showNotification('Please enter a valid positive number', 'error');
-            }
-            this.promptForEdgeDistance(cameraId, labels, index, distances);
-            return;
-        }
-        
-        distances[label.key] = parseFloat(distance);
-        console.log(`Camera ${cameraId}, ${label.key}: ${distances[label.key]}m`);
-        
-        this.promptForEdgeDistance(cameraId, labels, index + 1, distances);
-    },
-    
-    collectCameraDistances(cameraId, edgeDistances) {
-        const cameraDistances = {};
-        
-        const cameraLabels = [
-            { key: 'C1', description: 'Camera to P1 (3D straight line distance)' },
-            { key: 'C2', description: 'Camera to P2 (3D straight line distance)' },
-            { key: 'C3', description: 'Camera to P3 (3D straight line distance)' },
-            { key: 'C4', description: 'Camera to P4 (3D straight line distance)' }
-        ];
-        
-        this.promptForCameraDistance(cameraId, cameraLabels, 0, cameraDistances, edgeDistances);
-    },
-    
-    promptForCameraDistance(cameraId, labels, index, cameraDistances, edgeDistances) {
-        if (index >= labels.length) {
-            this.calculateAndDrawP3P4(cameraId, edgeDistances, cameraDistances);
-            return;
-        }
-        
-        const label = labels[index];
-        const distance = prompt(
-            `Camera ${cameraId} - Distance ${label.key}:\n\n` +
-            `Enter distance ${label.description} in meters:\n\n` +
-            `Press Cancel to abort calibration.`
-        );
-        
-        if (distance === null) {
-            this.clearCalibration(cameraId);
-            if (window.Utils) {
-                window.Utils.showNotification('Calibration cancelled', 'info');
-            }
-            return;
-        }
-        
-        const isValid = window.Utils ? 
-            window.Utils.isValidPositiveNumber(distance) : 
-            (!isNaN(parseFloat(distance)) && parseFloat(distance) > 0);
-        
-        if (!isValid) {
-            if (window.Utils) {
-                window.Utils.showNotification('Please enter a valid positive number', 'error');
-            }
-            this.promptForCameraDistance(cameraId, labels, index, cameraDistances, edgeDistances);
-            return;
-        }
-        
-        cameraDistances[label.key] = parseFloat(distance);
-        console.log(`Camera ${cameraId}, ${label.key}: ${cameraDistances[label.key]}m`);
-        
-        this.promptForCameraDistance(cameraId, labels, index + 1, cameraDistances, edgeDistances);
-    },
-    
-    calculateAndDrawP3P4(cameraId, edgeDistances, cameraDistances) {
+    calculateRemainingPoints(cameraId) {
         const calibData = this.calibrationData[`camera${cameraId}`];
         const canvas = document.getElementById(`canvas${cameraId}`);
         
-        const P1_pixel = calibData.points[0];
-        const P2_pixel = calibData.points[1];
+        console.log(`Calculating remaining points for camera ${cameraId} using only edge distances...`);
+        console.log('Visible points:', calibData.visiblePoints);
+        console.log('Placed points:', calibData.points);
+        console.log('Edge distances:', calibData.edgeDistances);
         
-        console.log(`Calculating P3 and P4 for camera ${cameraId}...`);
-        console.log('P1 pixel (top-left):', P1_pixel);
-        console.log('P2 pixel (top-right):', P2_pixel);
-        console.log('Edge distances:', edgeDistances);
-        console.log('Camera distances:', cameraDistances);
-        console.log('Camera height:', calibData.cameraHeight);
+        // Map visible points to their positions
+        const pointMap = {};
+        calibData.visiblePoints.forEach((name, index) => {
+            pointMap[name] = calibData.points[index];
+        });
         
-        const result = this.calculateP3P4FromGeometry(
-            P1_pixel, P2_pixel,
-            edgeDistances,
-            cameraDistances,
-            calibData.cameraHeight
-        );
+        console.log('Point map:', pointMap);
         
-        if (!result.success) {
-            console.warn(`P3/P4 calculation had issues: ${result.error}`);
-            
-            // Use simplified calculation as fallback
-            console.log('Using simplified geometric fallback...');
-            const fallbackResult = this.calculateP3P4Fallback(
-                P1_pixel, P2_pixel,
-                edgeDistances,
-                canvas
+        // Calculate remaining points using 2D geometry with edge distances only
+        let result;
+        
+        if (cameraId === 1) {
+            // Camera 1: P1 and P2 are visible, calculate P3 and P4
+            result = this.calculate2DPointsFromEdge(
+                pointMap.P1, pointMap.P2,
+                calibData.edgeDistances.D12,
+                calibData.edgeDistances.D13,
+                calibData.edgeDistances.D23,
+                calibData.edgeDistances.D24,
+                calibData.edgeDistances.D34
             );
             
-            if (!fallbackResult.success) {
-                if (window.Utils) {
-                    window.Utils.showNotification(
-                        `Failed to calculate P3/P4: ${fallbackResult.error}. Try recalibrating with accurate measurements.`,
-                        'error'
-                    );
-                }
-                this.clearCalibration(cameraId);
-                return;
-            }
-            
-            // Validate fallback results
-            if (isNaN(fallbackResult.P3.x) || isNaN(fallbackResult.P3.y) || 
-                isNaN(fallbackResult.P4.x) || isNaN(fallbackResult.P4.y)) {
-                if (window.Utils) {
-                    window.Utils.showNotification(
-                        `Invalid calibration calculation. Please verify your measurements are correct.`,
-                        'error'
-                    );
-                }
-                console.error('Fallback produced NaN values:', fallbackResult);
-                this.clearCalibration(cameraId);
-                return;
-            }
-            
-            calibData.points.push(fallbackResult.P3);
-            calibData.points.push(fallbackResult.P4);
-            
-            if (window.Utils) {
-                window.Utils.showNotification(
-                    `Using simplified calibration (P3/P4 may be approximate)`,
-                    'info'
-                );
+            if (result.success) {
+                calibData.points = [pointMap.P1, pointMap.P2, result.P3, result.P4];
             }
         } else {
-            console.log('Successfully calculated P3 and P4!');
-            console.log('P3 pixel (bottom-left):', result.P3);
-            console.log('P4 pixel (bottom-right):', result.P4);
-            console.log('P3 3D:', result.P3_3d);
-            console.log('P4 3D:', result.P4_3d);
+            // Camera 2: P3 and P4 are visible, calculate P1 and P2
+            result = this.calculate2DPointsFromEdge(
+                pointMap.P3, pointMap.P4,
+                calibData.edgeDistances.D34,
+                calibData.edgeDistances.D13,
+                calibData.edgeDistances.D23,
+                calibData.edgeDistances.D24,
+                calibData.edgeDistances.D12
+            );
             
-            // Validate 3D results
-            if (isNaN(result.P3.x) || isNaN(result.P3.y) || 
-                isNaN(result.P4.x) || isNaN(result.P4.y)) {
-                console.error('3D calculation produced NaN values, trying fallback...');
-                
-                const fallbackResult = this.calculateP3P4Fallback(
-                    P1_pixel, P2_pixel,
-                    edgeDistances,
-                    canvas
-                );
-                
-                if (!fallbackResult.success || 
-                    isNaN(fallbackResult.P3.x) || isNaN(fallbackResult.P3.y) || 
-                    isNaN(fallbackResult.P4.x) || isNaN(fallbackResult.P4.y)) {
-                    if (window.Utils) {
-                        window.Utils.showNotification(
-                            `Invalid calibration calculation. Please verify your measurements.`,
-                            'error'
-                        );
-                    }
-                    this.clearCalibration(cameraId);
-                    return;
-                }
-                
-                calibData.points.push(fallbackResult.P3);
-                calibData.points.push(fallbackResult.P4);
-            } else {
-                calibData.points.push(result.P3);
-                calibData.points.push(result.P4);
+            if (result.success) {
+                // For camera 2, the calculated points are P1 and P2
+                calibData.points = [result.P3, result.P4, pointMap.P3, pointMap.P4];
             }
         }
         
-        calibData.edgeDistances = edgeDistances;
-        calibData.cameraDistances = cameraDistances;
-        
-        // Final validation before drawing
-        if (calibData.points.some(p => isNaN(p.x) || isNaN(p.y))) {
-            console.error('Final validation failed - points contain NaN:', calibData.points);
+        if (!result.success) {
             if (window.Utils) {
                 window.Utils.showNotification(
-                    `Calibration failed. Please check your measurements are physically possible.`,
+                    `Failed to calculate remaining points: ${result.error}`,
                     'error'
                 );
             }
@@ -570,146 +407,195 @@ window.CalibrationManager = {
             return;
         }
         
-        // Draw all four points with labels
-        this.drawVisibleCalibrationPoints(canvas, calibData.points);
+        // Validate all points
+        if (calibData.points.some(p => isNaN(p.x) || isNaN(p.y))) {
+            console.error('Invalid points calculated:', calibData.points);
+            if (window.Utils) {
+                window.Utils.showNotification('Invalid calibration calculation', 'error');
+            }
+            this.clearCalibration(cameraId);
+            return;
+        }
+        
+        console.log('Final points (P1, P2, P3, P4):', calibData.points);
+        
+        // Draw all points
+        this.drawAllPoints(canvas, calibData.points);
         
         this.completeCalibrationShape(cameraId);
     },
     
-    calculateP3P4Fallback(P1_pixel, P2_pixel, edgeDistances, canvas) {
+    calculate2DPointsFromEdge(PA_pixel, PB_pixel, dAB, dAC, dBC, dBD, dCD) {
+        /**
+         * 2D calibration using only edge distances
+         * Given two points PA and PB (visible), calculate PC and PD
+         * 
+         * Layout:
+         * PA ----------- PB
+         *  |             |
+         *  |             |
+         * PC ----------- PD
+         * 
+         * Known: PA, PB positions (pixels)
+         *        dAB, dAC, dBC, dBD, dCD (real world distances in meters)
+         */
         try {
-            console.log('Using fallback 2D calculation...');
+            console.log('2D calibration - calculating from edge distances only');
             
-            // Calculate pixel distance between P1 and P2
-            const d12_pixel = Math.sqrt(
-                Math.pow(P2_pixel.x - P1_pixel.x, 2) + 
-                Math.pow(P2_pixel.y - P1_pixel.y, 2)
+            // Calculate pixels per meter from the known edge
+            const pixelDistance_AB = Math.sqrt(
+                (PB_pixel.x - PA_pixel.x) ** 2 + 
+                (PB_pixel.y - PA_pixel.y) ** 2
             );
+            const pixelsPerMeter = pixelDistance_AB / dAB;
             
-            if (d12_pixel === 0 || edgeDistances.D12 === 0) {
-                throw new Error('Invalid P1-P2 distance');
-            }
+            console.log(`Pixels per meter: ${pixelsPerMeter.toFixed(2)} (from ${pixelDistance_AB.toFixed(1)}px / ${dAB}m)`);
             
-            const pixelsPerMeter = d12_pixel / edgeDistances.D12;
-            console.log(`Fallback pixels per meter: ${pixelsPerMeter.toFixed(2)}`);
+            // Convert all distances to pixels
+            const dAC_px = dAC * pixelsPerMeter;
+            const dBC_px = dBC * pixelsPerMeter;
+            const dBD_px = dBD * pixelsPerMeter;
+            const dCD_px = dCD * pixelsPerMeter;
             
-            // Calculate P3 using law of cosines
-            const d13_pixels = edgeDistances.D13 * pixelsPerMeter;
-            const d23_pixels = edgeDistances.D23 * pixelsPerMeter;
+            // Calculate PC using triangulation from PA and PB
+            const PC_pixel = this.triangulatePoint2D(PA_pixel, PB_pixel, dAC_px, dBC_px);
             
-            // Cosine of angle at P1
-            const cosAngleAtP1 = (d12_pixel * d12_pixel + d13_pixels * d13_pixels - d23_pixels * d23_pixels) / 
-                                  (2 * d12_pixel * d13_pixels);
+            console.log('PC calculated:', PC_pixel);
             
-            // Clamp to valid range for acos
-            const clampedCos = Math.max(-1, Math.min(1, cosAngleAtP1));
-            const angleAtP1 = Math.acos(clampedCos);
+            // Calculate PD using triangulation from PB and PC
+            const PD_pixel = this.triangulatePoint2D(PB_pixel, PC_pixel, dBD_px, dCD_px);
             
-            // Calculate angle from P1 to P2
-            const baseAngle = Math.atan2(P2_pixel.y - P1_pixel.y, P2_pixel.x - P1_pixel.x);
-            
-            // P3 should be below P1 (downward from top-left)
-            const angle1 = baseAngle + angleAtP1;
-            const angle2 = baseAngle - angleAtP1;
-            
-            const P3_option1 = {
-                x: P1_pixel.x + d13_pixels * Math.cos(angle1),
-                y: P1_pixel.y + d13_pixels * Math.sin(angle1)
-            };
-            
-            const P3_option2 = {
-                x: P1_pixel.x + d13_pixels * Math.cos(angle2),
-                y: P1_pixel.y + d13_pixels * Math.sin(angle2)
-            };
-            
-            // Choose option with larger Y (more downward, as P3 is bottom-left)
-            const P3 = P3_option1.y > P3_option2.y ? P3_option1 : P3_option2;
-            
-            console.log(`P3 calculated (bottom-left): (${P3.x.toFixed(1)}, ${P3.y.toFixed(1)})`);
-            
-            // Verify P3 distance to P2
-            const p2_p3_dist = Math.sqrt((P3.x - P2_pixel.x)**2 + (P3.y - P2_pixel.y)**2);
-            console.log(`P2-P3 distance check: ${p2_p3_dist.toFixed(1)}px vs expected ${d23_pixels.toFixed(1)}px`);
-            
-            // Calculate P4 using law of cosines from P2-P3-P4 triangle
-            const d24_pixels = edgeDistances.D24 * pixelsPerMeter;
-            const d34_pixels = edgeDistances.D34 * pixelsPerMeter;
-            
-            // Cosine of angle at P3
-            const cosAngleAtP3 = (d23_pixels * d23_pixels + d34_pixels * d34_pixels - d24_pixels * d24_pixels) / 
-                                  (2 * d23_pixels * d34_pixels);
-            
-            const clampedCosP3 = Math.max(-1, Math.min(1, cosAngleAtP3));
-            const angleAtP3 = Math.acos(clampedCosP3);
-            
-            // Calculate angle from P2 to P3
-            const p2_p3_angle = Math.atan2(P3.y - P2_pixel.y, P3.x - P2_pixel.x);
-            
-            // P4 continues the rectangle (should be to the right and down from P2)
-            const angle_p3_p4_option1 = p2_p3_angle + angleAtP3;
-            const angle_p3_p4_option2 = p2_p3_angle - angleAtP3;
-            
-            const P4_option1 = {
-                x: P3.x + d34_pixels * Math.cos(angle_p3_p4_option1),
-                y: P3.y + d34_pixels * Math.sin(angle_p3_p4_option1)
-            };
-            
-            const P4_option2 = {
-                x: P3.x + d34_pixels * Math.cos(angle_p3_p4_option2),
-                y: P3.y + d34_pixels * Math.sin(angle_p3_p4_option2)
-            };
-            
-            // Choose option with larger X (more to the right, as P4 is bottom-right)
-            const P4 = P4_option1.x > P4_option2.x ? P4_option1 : P4_option2;
-            
-            console.log(`P4 calculated (bottom-right): (${P4.x.toFixed(1)}, ${P4.y.toFixed(1)})`);
-            
-            // Verify distances
-            const p2_p4_dist = Math.sqrt((P4.x - P2_pixel.x)**2 + (P4.y - P2_pixel.y)**2);
-            const p3_p4_dist = Math.sqrt((P4.x - P3.x)**2 + (P4.y - P3.y)**2);
-            console.log(`P2-P4 distance check: ${p2_p4_dist.toFixed(1)}px vs expected ${d24_pixels.toFixed(1)}px`);
-            console.log(`P3-P4 distance check: ${p3_p4_dist.toFixed(1)}px vs expected ${d34_pixels.toFixed(1)}px`);
-            
-            // Check for NaN
-            if (isNaN(P3.x) || isNaN(P3.y) || isNaN(P4.x) || isNaN(P4.y)) {
-                throw new Error('Calculation produced NaN values');
-            }
+            console.log('PD calculated:', PD_pixel);
             
             return {
                 success: true,
-                P3: P3,
-                P4: P4
+                P3: PC_pixel,
+                P4: PD_pixel,
+                pixelsPerMeter: pixelsPerMeter
             };
-            
         } catch (error) {
-            console.error('Fallback calculation failed:', error);
-            return { 
-                success: false, 
-                error: 'Geometric calculation failed - check measurements are consistent' 
-            };
+            console.error('Error in 2D calibration:', error);
+            return { success: false, error: error.message };
         }
     },
     
-    drawVisibleCalibrationPoints(canvas, points) {
-        // Draw all four points with proper labels
-        const ctx = canvas.getContext('2d');
+    triangulatePoint2D(P1, P2, d1, d2) {
+        /**
+         * Find point P3 given:
+         * - P1 and P2 (known positions)
+         * - d1 = distance from P1 to P3
+         * - d2 = distance from P2 to P3
+         * 
+         * Using circle intersection method
+         */
         
-        const pointLabels = ['P1 (top-left)', 'P2 (top-right)', 'P3 (bottom-left)', 'P4 (bottom-right)'];
+        // Distance between P1 and P2
+        const dx = P2.x - P1.x;
+        const dy = P2.y - P1.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
         
-        for (let i = 0; i < Math.min(points.length, 4); i++) {
-            const point = points[i];
+        if (d > d1 + d2) {
+            throw new Error('Circles do not intersect - distances too short');
+        }
+        if (d < Math.abs(d1 - d2)) {
+            throw new Error('One circle contains the other - distances invalid');
+        }
+        if (d === 0 && d1 === d2) {
+            throw new Error('Circles are coincident');
+        }
+        
+        // Calculate intersection points
+        const a = (d1 * d1 - d2 * d2 + d * d) / (2 * d);
+        const h = Math.sqrt(d1 * d1 - a * a);
+        
+        // Point along the line P1-P2
+        const px = P1.x + (a / d) * dx;
+        const py = P1.y + (a / d) * dy;
+        
+        // Two possible intersection points (perpendicular to P1-P2)
+        const solution1 = {
+            x: px + (h / d) * dy,
+            y: py - (h / d) * dx
+        };
+        
+        const solution2 = {
+            x: px - (h / d) * dy,
+            y: py + (h / d) * dx
+        };
+        
+        // Choose the solution that forms the correct geometry
+        // For a quadrilateral, we want the point that's "below" the line P1-P2
+        // Use cross product to determine which side
+        const cross1 = dx * (solution1.y - P1.y) - dy * (solution1.x - P1.x);
+        const cross2 = dx * (solution2.y - P1.y) - dy * (solution2.x - P1.x);
+        
+        // Return the point with positive cross product (below the line)
+        if (cross1 > 0) {
+            return solution1;
+        } else {
+            return solution2;
+        }
+    },
+    
+    calculateP3P4FromP1P2(P1_pixel, P2_pixel, edgeDistances, cameraDistances, cameraHeight) {
+        // Same 3D geometry calculation as before
+        return this.calculateP3P4FromGeometry(P1_pixel, P2_pixel, edgeDistances, cameraDistances, cameraHeight);
+    },
+    
+    calculateP1P2FromP3P4(P3_pixel, P4_pixel, edgeDistances, cameraDistances, cameraHeight) {
+        // Similar to P3P4 calculation but in reverse
+        // For Camera 2, we calculate P1 and P2 from P3 and P4
+        try {
+            console.log('Calculating P1 and P2 from P3 and P4...');
             
-            // Check if point is within canvas bounds (with some margin)
-            if (point.x >= -50 && point.x <= canvas.width + 50 && 
-                point.y >= -50 && point.y <= canvas.height + 50) {
-                this.drawCalibrationPoint(canvas, point.x, point.y, i + 1);
-                console.log(`Drew ${pointLabels[i]}: (${point.x.toFixed(1)}, ${point.y.toFixed(1)})`);
-            } else {
-                console.log(`${pointLabels[i]} is outside viewport: (${point.x.toFixed(1)}, ${point.y.toFixed(1)})`);
-            }
+            const P3_3d = this.pixelTo3DWorld(P3_pixel, cameraDistances.C3, cameraHeight);
+            const P4_3d = this.pixelTo3DWorld(P4_pixel, cameraDistances.C4, cameraHeight);
+            
+            console.log('P3_3d:', P3_3d);
+            console.log('P4_3d:', P4_3d);
+            
+            // Calculate P1 from P3 and P4 using D13 and D14
+            const P1_3d = this.solvePointFrom3Constraints(
+                P3_3d, P4_3d,
+                edgeDistances.D13, edgeDistances.D14,
+                cameraDistances.C1,
+                cameraHeight
+            );
+            
+            console.log('P1_3d:', P1_3d);
+            
+            // Calculate P2 from P1, P3, P4
+            // P2 connects to P1 with D12, to P3 with D23, and to P4 with D24
+            const P2_3d = this.solvePointFrom3Constraints(
+                P1_3d, P3_3d,
+                edgeDistances.D12, edgeDistances.D23,
+                cameraDistances.C2,
+                cameraHeight
+            );
+            
+            console.log('P2_3d:', P2_3d);
+            
+            // Project back to pixel coordinates
+            const P1_pixel = this.worldTo2DPixel(P1_3d, cameraHeight, P3_pixel, P4_pixel, P3_3d, P4_3d);
+            const P2_pixel = this.worldTo2DPixel(P2_3d, cameraHeight, P3_pixel, P4_pixel, P3_3d, P4_3d);
+            
+            console.log('P1_pixel:', P1_pixel);
+            console.log('P2_pixel:', P2_pixel);
+            
+            return {
+                success: true,
+                P1: P1_pixel,
+                P2: P2_pixel,
+                P1_3d: P1_3d,
+                P2_3d: P2_3d
+            };
+        } catch (error) {
+            console.error('Error calculating P1/P2:', error);
+            return { success: false, error: error.message };
         }
     },
     
+    // Include all the 3D geometry functions from the original file
     calculateP3P4FromGeometry(P1_pixel, P2_pixel, edgeDistances, cameraDistances, cameraHeight) {
         try {
             console.log('Step 1: Converting P1, P2 to 3D...');
@@ -718,10 +604,6 @@ window.CalibrationManager = {
             
             console.log('P1_3d:', P1_3d);
             console.log('P2_3d:', P2_3d);
-            
-            const d12_calculated = this.distance3D(P1_3d, P2_3d);
-            const d12_error = Math.abs(d12_calculated - edgeDistances.D12);
-            console.log(`D12 verification: calculated=${d12_calculated.toFixed(3)}m, expected=${edgeDistances.D12}m, error=${d12_error.toFixed(3)}m`);
             
             console.log('Step 2: Calculating P3 from constraints...');
             const P3_3d = this.solvePointFrom3Constraints(
@@ -743,18 +625,7 @@ window.CalibrationManager = {
             
             console.log('P4_3d:', P4_3d);
             
-            console.log('Step 4: Verifying geometry...');
-            if (!this.verifyPointGeometry(P3_3d, P1_3d, P2_3d, { D13: edgeDistances.D13, D23: edgeDistances.D23 })) {
-                return { success: false, error: 'P3 geometry verification failed' };
-            }
-            
-            if (!this.verifyPointGeometry(P4_3d, P2_3d, P3_3d, { D13: edgeDistances.D24, D23: edgeDistances.D34 })) {
-                return { success: false, error: 'P4 geometry verification failed' };
-            }
-            
-            console.log('Geometry verified successfully!');
-            
-            console.log('Step 5: Projecting back to pixel coordinates...');
+            console.log('Step 4: Projecting back to pixel coordinates...');
             const P3_pixel = this.worldTo2DPixel(P3_3d, cameraHeight, P1_pixel, P2_pixel, P1_3d, P2_3d);
             const P4_pixel = this.worldTo2DPixel(P4_3d, cameraHeight, P1_pixel, P2_pixel, P1_3d, P2_3d);
             
@@ -768,7 +639,6 @@ window.CalibrationManager = {
                 P3_3d: P3_3d,
                 P4_3d: P4_3d
             };
-            
         } catch (error) {
             console.error('Error in calculateP3P4FromGeometry:', error);
             return { success: false, error: error.message };
@@ -804,10 +674,8 @@ window.CalibrationManager = {
         
         const R = cameraDistance * cameraDistance - height * height;
         
-        // Ensure R is positive
         if (R <= 0) {
             console.warn('Camera distance must be greater than height');
-            // Use approximate calculation
             return this.approximatePointPosition(P1, P2, d1, d2);
         }
         
@@ -830,7 +698,6 @@ window.CalibrationManager = {
                 solutions.push({ x: x1, y: y1, z: -height });
                 solutions.push({ x: x2, y: y2, z: -height });
             } else {
-                console.warn('No exact solution - using approximation');
                 return this.approximatePointPosition(P1, P2, d1, d2);
             }
         } else if (Math.abs(A) > 0.001) {
@@ -844,16 +711,13 @@ window.CalibrationManager = {
                 solutions.push({ x: x, y: y1, z: -height });
                 solutions.push({ x: x, y: y2, z: -height });
             } else {
-                console.warn('No exact solution - using approximation');
                 return this.approximatePointPosition(P1, P2, d1, d2);
             }
         } else {
-            console.warn('Degenerate case - using approximation');
             return this.approximatePointPosition(P1, P2, d1, d2);
         }
         
         if (solutions.length === 0) {
-            console.warn('No solution found - using approximation');
             return this.approximatePointPosition(P1, P2, d1, d2);
         }
         
@@ -861,12 +725,9 @@ window.CalibrationManager = {
     },
     
     approximatePointPosition(P1, P2, d1, d2) {
-        // Simple 2D approximation based on distances
         const d12 = Math.sqrt((P2.x - P1.x)**2 + (P2.y - P1.y)**2);
-        
-        // Use law of cosines to approximate position
         const cosAngle = (d12*d12 + d1*d1 - d2*d2) / (2 * d12 * d1);
-        const angle = Math.acos(Math.max(-1, Math.min(1, cosAngle))); // Clamp to valid range
+        const angle = Math.acos(Math.max(-1, Math.min(1, cosAngle)));
         
         const P1_to_P2_angle = Math.atan2(P2.y - P1.y, P2.x - P1.x);
         const P1_to_P3_angle = P1_to_P2_angle + angle;
@@ -899,26 +760,6 @@ window.CalibrationManager = {
         return bestSolution;
     },
     
-    verifyPointGeometry(P3, P1, P2, distances) {
-        const dist_P3_P1 = this.distance3D(P3, P1);
-        const dist_P3_P2 = this.distance3D(P3, P2);
-        
-        // More lenient tolerance for real-world measurements (30% tolerance)
-        const tolerance = Math.max(distances.D13, distances.D23) * 0.3;
-        
-        const error1 = Math.abs(dist_P3_P1 - distances.D13);
-        const error2 = Math.abs(dist_P3_P2 - distances.D23);
-        
-        console.log(`Geometry verification: error1=${error1.toFixed(3)}m (${(error1/distances.D13*100).toFixed(1)}%), error2=${error2.toFixed(3)}m (${(error2/distances.D23*100).toFixed(1)}%), tolerance=${tolerance.toFixed(3)}m`);
-        
-        if (error1 > tolerance || error2 > tolerance) {
-            console.warn(`Geometry verification warning: errors exceed tolerance - using approximate solution`);
-            return false; // Will trigger fallback
-        }
-        
-        return true;
-    },
-    
     distance3D(P1, P2) {
         return Math.sqrt(
             (P1.x - P2.x) ** 2 +
@@ -942,68 +783,61 @@ window.CalibrationManager = {
         return { x: pixel_x, y: pixel_y };
     },
     
+    drawAllPoints(canvas, points) {
+        const pointLabels = ['P1', 'P2', 'P3', 'P4'];
+        
+        for (let i = 0; i < points.length; i++) {
+            const point = points[i];
+            if (point.x >= -50 && point.x <= canvas.width + 50 && 
+                point.y >= -50 && point.y <= canvas.height + 50) {
+                this.drawCalibrationPoint(canvas, point.x, point.y, pointLabels[i]);
+            }
+        }
+    },
+    
     completeCalibrationShape(cameraId) {
         const calibData = this.calibrationData[`camera${cameraId}`];
         const canvas = document.getElementById(`canvas${cameraId}`);
-        const ctx = canvas.getContext('2d');
         
-        // Calculate pixels per meter first
+        // Calculate pixels per meter
         const avgPixelsPerMeter = this.calculatePixelsPerMeter(calibData);
         calibData.pixelsPerMeter = avgPixelsPerMeter;
         
-        // Mark calibration as complete
         canvas.classList.remove('active');
         calibData.isCalibrating = false;
         
-        // Store current canvas dimensions before zoom removal
         const zoomedCanvasWidth = canvas.width;
         const zoomedCanvasHeight = canvas.height;
         
-        // REMOVE ZOOM - restore normal dual camera view
+        // Remove zoom
         const cameraContainer = document.querySelector('.camera-container');
         const cameraFeed = document.querySelector(`.camera-feed:nth-child(${cameraId})`);
         
         if (cameraContainer) {
             cameraContainer.classList.remove('calibrating');
-            console.log('Removed calibrating class from camera container - zoom disabled');
         }
         if (cameraFeed) {
             cameraFeed.classList.remove('calibrating-active');
-            console.log(`Camera feed ${cameraId} unzoomed - back to dual view`);
         }
         
-        // Wait for zoom removal to take effect, then rescale points
+        // Rescale points after zoom removal
         setTimeout(() => {
-            // Get new canvas dimensions after zoom removal
             const newCanvasWidth = canvas.width;
             const newCanvasHeight = canvas.height;
             
-            console.log(`Canvas size changed from ${zoomedCanvasWidth}x${zoomedCanvasHeight} to ${newCanvasWidth}x${newCanvasHeight}`);
-            
-            // Calculate scale factors
             const scaleX = newCanvasWidth / zoomedCanvasWidth;
             const scaleY = newCanvasHeight / zoomedCanvasHeight;
             
-            // Rescale all points
             if (Math.abs(scaleX - 1.0) > 0.01 || Math.abs(scaleY - 1.0) > 0.01) {
-                console.log(`Rescaling calibration points: scaleX=${scaleX.toFixed(3)}, scaleY=${scaleY.toFixed(3)}`);
-                
                 calibData.points = calibData.points.map(point => ({
                     x: point.x * scaleX,
                     y: point.y * scaleY
                 }));
                 
-                console.log('Rescaled points:', calibData.points);
-                
-                // Recalculate pixels per meter with rescaled points
                 calibData.pixelsPerMeter = this.calculatePixelsPerMeter(calibData);
-                console.log(`Recalculated pixels per meter: ${calibData.pixelsPerMeter.toFixed(2)}`);
             }
             
-            // Redraw with rescaled points
             this.drawCompleteCalibrationPolygon(cameraId);
-            
-            // Update info display
             this.updateCalibrationInfo(cameraId);
         }, 150);
         
@@ -1014,147 +848,84 @@ window.CalibrationManager = {
             button.querySelector('.btn-text').textContent = 'Calibrate';
         }
         
-        // Draw the complete calibration polygon (will be redrawn after rescaling)
         this.drawCompleteCalibrationPolygon(cameraId);
-        
-        // Save calibration data
         this.saveCalibrationData();
         
-        // Resume processing
         if (window.ProcessingManager) {
             window.ProcessingManager.resumeAfterCalibration();
         }
         
-        // Redraw multiple times to ensure visibility after zoom changes
-        setTimeout(() => {
-            this.drawCompleteCalibrationPolygon(cameraId);
-        }, 100);
-        
-        setTimeout(() => {
-            this.drawCompleteCalibrationPolygon(cameraId);
-        }, 500);
-        
-        setTimeout(() => {
-            this.drawCompleteCalibrationPolygon(cameraId);
-        }, 1000);
-        
-        // Start continuous redraw to keep calibration visible (every 2 seconds)
+        // Continuous redraw at high frequency for persistence
         if (calibData.redrawInterval) {
             clearInterval(calibData.redrawInterval);
         }
         calibData.redrawInterval = setInterval(() => {
             this.drawCompleteCalibrationPolygon(cameraId);
-        }, 2000);
+        }, 100); // Redraw every 100ms for persistent visibility
         
         if (window.Utils) {
             window.Utils.showNotification(`Camera ${cameraId} 3D calibration complete!`, 'success');
         }
         
-        console.log(`Camera ${cameraId} 3D calibration complete:`, {
-            pixelsPerMeter: avgPixelsPerMeter,
-            areaSquareMeters: areaSquareMeters,
-            cameraHeight: calibData.cameraHeight,
-            points: calibData.points,
-            pointLabels: ['P1 (top-left)', 'P2 (top-right)', 'P3 (bottom-left)', 'P4 (bottom-right)']
-        });
+        console.log(`Camera ${cameraId} calibration complete with config-based measurements`);
     },
     
     updateCalibrationInfo(cameraId) {
         const calibData = this.calibrationData[`camera${cameraId}`];
         const info = document.getElementById(`calibrationInfo${cameraId}`);
         
+        // Hide the info box - don't display it
+        if (info) {
+            info.classList.remove('show');
+        }
+        
+        return; // Don't show the calibration info box
+        
         if (!calibData.pixelsPerMeter || calibData.points.length !== 4) {
-            console.warn(`Cannot update info for camera ${cameraId}: calibration incomplete`);
             return;
         }
         
-        const areaPixels = window.Utils ? 
-            window.Utils.calculatePolygonArea(calibData.points) : 
-            this.calculatePolygonAreaFallback(calibData.points);
+        const areaPixels = this.calculatePolygonArea(calibData.points);
         const areaSquareMeters = areaPixels / (calibData.pixelsPerMeter * calibData.pixelsPerMeter);
         
-        // Build comprehensive info display
         let infoLines = [];
         infoLines.push(`<strong>3D Calibrated: ${areaSquareMeters.toFixed(2)} m²</strong>`);
         infoLines.push(`Camera Height: ${calibData.cameraHeight.toFixed(2)}m`);
         infoLines.push(`Pixels/Meter: ${calibData.pixelsPerMeter.toFixed(1)}`);
         
-        // Add edge distances with descriptive labels
-        if (calibData.edgeDistances) {
-            infoLines.push(`<br><strong>Edge Distances:</strong>`);
-            infoLines.push(`D12 (P1→P2 top edge): ${calibData.edgeDistances.D12.toFixed(2)}m`);
-            infoLines.push(`D13 (P1→P3 left edge): ${calibData.edgeDistances.D13.toFixed(2)}m`);
-            infoLines.push(`D23 (P2→P3 diagonal): ${calibData.edgeDistances.D23.toFixed(2)}m`);
-            infoLines.push(`D24 (P2→P4 right edge): ${calibData.edgeDistances.D24.toFixed(2)}m`);
-            infoLines.push(`D34 (P3→P4 bottom edge): ${calibData.edgeDistances.D34.toFixed(2)}m`);
-        }
-        
-        // Add camera distances with descriptive labels
-        if (calibData.cameraDistances) {
-            infoLines.push(`<br><strong>Camera Distances:</strong>`);
-            infoLines.push(`C1 (Camera→P1): ${calibData.cameraDistances.C1.toFixed(2)}m`);
-            infoLines.push(`C2 (Camera→P2): ${calibData.cameraDistances.C2.toFixed(2)}m`);
-            infoLines.push(`C3 (Camera→P3): ${calibData.cameraDistances.C3.toFixed(2)}m`);
-            infoLines.push(`C4 (Camera→P4): ${calibData.cameraDistances.C4.toFixed(2)}m`);
-        }
-        
         info.innerHTML = infoLines.join('<br>');
         info.classList.add('show');
-        
-        // Also log to console for debugging
-        console.log(`Camera ${cameraId} calibration info updated:`);
-        console.log(`  Area: ${areaSquareMeters.toFixed(2)} m² (${areaPixels.toFixed(0)} pixels)`);
-        console.log(`  Camera Height: ${calibData.cameraHeight.toFixed(2)}m`);
-        console.log(`  Pixels per Meter: ${calibData.pixelsPerMeter.toFixed(1)}`);
-        if (calibData.edgeDistances) {
-            console.log(`  Edge Distances:`, calibData.edgeDistances);
-        }
-        if (calibData.cameraDistances) {
-            console.log(`  Camera Distances:`, calibData.cameraDistances);
-        }
-        console.log(`  Points:`, calibData.points);
     },
     
     drawCompleteCalibrationPolygon(cameraId) {
         const calibData = this.calibrationData[`camera${cameraId}`];
         const canvas = document.getElementById(`canvas${cameraId}`);
         
+        console.log(`[DRAW] Camera ${cameraId} - drawCompleteCalibrationPolygon called`, {
+            canvasExists: !!canvas,
+            pointsLength: calibData.points.length,
+            P1: calibData.points[0],
+            P2: calibData.points[1],
+            P3: calibData.points[2],
+            P4: calibData.points[3],
+            canvasSize: canvas ? `${canvas.width}x${canvas.height}` : 'N/A'
+        });
+        
         if (!canvas || calibData.points.length !== 4) {
-            console.warn(`Cannot draw polygon for camera ${cameraId}: missing canvas or points`);
+            console.warn(`[DRAW] Camera ${cameraId} - Cannot draw: ${!canvas ? 'canvas missing' : 'not 4 points'}`);
             return;
         }
         
         const ctx = canvas.getContext('2d');
-        
-        // Clear canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        console.log(`Drawing calibration polygon for camera ${cameraId} on canvas ${canvas.width}x${canvas.height}`);
-        console.log('Points: P1 (top-left), P2 (top-right), P3 (bottom-left), P4 (bottom-right)');
-        console.log(calibData.points);
+        console.log(`[DRAW] Camera ${cameraId} - Drawing polygon with bright colors for visibility test`);
         
-        // Check which points are visible
-        const visiblePoints = calibData.points.map((p, i) => ({
-            point: p,
-            index: i,
-            visible: p.x >= 0 && p.x <= canvas.width && p.y >= 0 && p.y <= canvas.height
-        }));
-        
-        const allVisible = visiblePoints.every(p => p.visible);
-        const someVisible = visiblePoints.some(p => p.visible);
-        
-        if (!someVisible) {
-            console.warn('All calibration points are outside viewport');
-            return;
-        }
-        
-        // Draw filled polygon - clip to canvas bounds
+        // Draw polygon with VERY VISIBLE colors for testing
         ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, 0, canvas.width, canvas.height);
-        ctx.clip();
         
-        ctx.fillStyle = 'rgba(78, 205, 196, 0.5)';
+        // Draw a bright red semi-transparent fill
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
         ctx.beginPath();
         ctx.moveTo(calibData.points[0].x, calibData.points[0].y);
         for (let i = 1; i < 4; i++) {
@@ -1163,39 +934,149 @@ window.CalibrationManager = {
         ctx.closePath();
         ctx.fill();
         
-        // Draw outline
-        ctx.strokeStyle = '#4ecdc4';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        for (let i = 0; i < 4; i++) {
-            const p1 = calibData.points[i];
-            const p2 = calibData.points[(i + 1) % 4];
-            
-            if (i === 0) ctx.moveTo(p1.x, p1.y);
-            ctx.lineTo(p2.x, p2.y);
-        }
-        ctx.closePath();
+        // Draw a thick bright cyan border
+        ctx.strokeStyle = '#00FFFF';
+        ctx.lineWidth = 5;
         ctx.stroke();
         
         ctx.restore();
         
-        // Draw only visible points with labels
-        const pointLabels = ['P1 (top-left)', 'P2 (top-right)', 'P3 (bottom-left)', 'P4 (bottom-right)'];
+        console.log(`[DRAW] Camera ${cameraId} - Polygon drawn successfully`);
+        
+        // Draw a TEST RECTANGLE in top-left corner to prove canvas is visible
+        ctx.fillStyle = 'yellow';
+        ctx.fillRect(10, 10, 50, 50);
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(10, 10, 50, 50);
+        console.log(`[DRAW] Camera ${cameraId} - Test rectangle drawn at (10,10)`);
+        
+        // Draw distance labels on edges if available
+        if (calibData.edgeDistances) {
+            console.log(`[DRAW] Camera ${cameraId} - Drawing edge distance labels`);
+            this.drawEdgeDistanceLabels(canvas, calibData);
+        }
+        
+        // Draw points - only label the visible points for this camera
+        const pointLabels = ['P1', 'P2', 'P3', 'P4'];
+        const visiblePoints = calibData.visiblePoints;
+        
+        console.log(`[DRAW] Camera ${cameraId} - Drawing points (visible: ${visiblePoints.join(', ')})`);
+        
         for (let i = 0; i < 4; i++) {
             const point = calibData.points[i];
+            const pointLabel = pointLabels[i];
+            
+            // Only draw label if this point is visible for this camera
+            const isVisible = visiblePoints.includes(pointLabel);
+            
             if (point.x >= -50 && point.x <= canvas.width + 50 && 
                 point.y >= -50 && point.y <= canvas.height + 50) {
-                this.drawCalibrationPoint(canvas, point.x, point.y, i + 1);
-            } else {
-                console.log(`${pointLabels[i]} outside viewport`);
+                if (isVisible) {
+                    // Draw with label for visible points
+                    this.drawCalibrationPoint(canvas, point.x, point.y, pointLabel);
+                } else {
+                    // Draw small dot without label for calculated points
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = 'rgba(255, 107, 107, 0.3)';
+                    ctx.beginPath();
+                    ctx.arc(point.x, point.y, 6, 0, 2 * Math.PI);
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
             }
         }
+    },
+    
+    drawEdgeDistanceLabels(canvas, calibData) {
+        const ctx = canvas.getContext('2d');
+        const points = calibData.points;
+        const distances = calibData.edgeDistances;
         
-        if (!allVisible) {
-            console.log(`Some calibration points outside viewport - showing visible portion only`);
-        }
+        // Only show perimeter edge distances (4 edges of the quadrilateral)
+        // D12 (P1-P2 top), D24 (P2-P4 right), D34 (P3-P4 bottom), D41 (P4-P1 left)
+        // Note: D13 is a diagonal, not shown
+        const edgeConfig = [
+            { p1Idx: 0, p2Idx: 1, distanceKey: 'D12', color: '#FFD700', label: 'D12' },  // P1 to P2 (top)
+            { p1Idx: 1, p2Idx: 3, distanceKey: 'D24', color: '#FFA500', label: 'D24' },  // P2 to P4 (right)
+            { p1Idx: 2, p2Idx: 3, distanceKey: 'D34', color: '#7CFC00', label: 'D34' },  // P3 to P4 (bottom)
+            { p1Idx: 3, p2Idx: 0, distanceKey: 'D41', color: '#FF69B4', label: 'D41' }   // P4 to P1 (left)
+        ];
         
-        console.log(`Calibration polygon drawn successfully for camera ${cameraId}`);
+        ctx.save();
+        
+        edgeConfig.forEach(config => {
+            const p1 = points[config.p1Idx];
+            const p2 = points[config.p2Idx];
+            
+            // Check if distance exists in config
+            if (!distances[config.distanceKey]) {
+                return;
+            }
+            
+            // More lenient viewport check - allow points well outside visible area
+            const inViewport = (p) => p.x >= -500 && p.x <= canvas.width + 500 && 
+                                      p.y >= -500 && p.y <= canvas.height + 500;
+            
+            if (!inViewport(p1) && !inViewport(p2)) {
+                // Only skip if BOTH points are way off screen
+                return;
+            }
+            
+            // Calculate midpoint
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2;
+            
+            // Skip label if midpoint is too far outside viewport
+            if (midX < -100 || midX > canvas.width + 100 || 
+                midY < -100 || midY > canvas.height + 100) {
+                return;
+            }
+            
+            // Calculate angle for label rotation
+            const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            
+            // Draw the distance label
+            const distanceValue = distances[config.distanceKey];
+            const labelText = `${config.label}: ${distanceValue.toFixed(1)}m`;
+            
+            ctx.save();
+            ctx.translate(midX, midY);
+            
+            // Rotate text to align with edge (keep it readable)
+            let textAngle = angle;
+            if (Math.abs(textAngle) > Math.PI / 2) {
+                textAngle += Math.PI;
+            }
+            ctx.rotate(textAngle);
+            
+            // Draw label background
+            ctx.font = 'bold 16px Arial';
+            const metrics = ctx.measureText(labelText);
+            const padding = 8;
+            const boxWidth = metrics.width + padding * 2;
+            const boxHeight = 24;
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+            ctx.fillRect(-boxWidth / 2, -boxHeight / 2, boxWidth, boxHeight);
+            
+            // Draw label border
+            ctx.strokeStyle = config.color;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(-boxWidth / 2, -boxHeight / 2, boxWidth, boxHeight);
+            
+            // Draw label text
+            ctx.fillStyle = config.color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(labelText, 0, 0);
+            
+            ctx.restore();
+        });
+        
+        ctx.restore();
     },
     
     calculatePixelsPerMeter(calibData) {
@@ -1216,17 +1097,12 @@ window.CalibrationManager = {
         }
         
         const d13_pixel = this.distance2D(points[0], points[2]);
-        const d23_pixel = this.distance2D(points[1], points[2]);
         const d24_pixel = this.distance2D(points[1], points[3]);
-        const d34_pixel = this.distance2D(points[2], points[3]);
         
         if (edgeDistances.D13) ratios.push(d13_pixel / edgeDistances.D13);
-        if (edgeDistances.D23) ratios.push(d23_pixel / edgeDistances.D23);
         if (edgeDistances.D24) ratios.push(d24_pixel / edgeDistances.D24);
-        if (edgeDistances.D34) ratios.push(d34_pixel / edgeDistances.D34);
         
         const avgRatio = ratios.reduce((sum, r) => sum + r, 0) / ratios.length;
-        
         return avgRatio;
     },
     
@@ -1234,7 +1110,7 @@ window.CalibrationManager = {
         return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
     },
     
-    calculatePolygonAreaFallback(points) {
+    calculatePolygonArea(points) {
         if (points.length < 3) return 0;
         
         let area = 0;
@@ -1252,25 +1128,20 @@ window.CalibrationManager = {
         const info = document.getElementById(`calibrationInfo${cameraId}`);
         const button = document.querySelector(`.camera-feed:nth-child(${cameraId}) .btn-calibrate`);
         
-        // Clear redraw interval
         if (calibData.redrawInterval) {
             clearInterval(calibData.redrawInterval);
             calibData.redrawInterval = null;
         }
         
         calibData.points = [];
-        calibData.edgeDistances = null;
-        calibData.cameraDistances = null;
         calibData.isCalibrating = false;
         calibData.pixelsPerMeter = null;
-        calibData.cameraHeight = null;
         
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
         canvas.classList.remove('active');
         
-        // REMOVE ZOOM - restore normal view
         const cameraContainer = document.querySelector('.camera-container');
         const cameraFeed = document.querySelector(`.camera-feed:nth-child(${cameraId})`);
         
@@ -1293,72 +1164,218 @@ window.CalibrationManager = {
         }
         
         this.saveCalibrationData();
-        
-        console.log(`Cleared calibration for camera ${cameraId}`);
-    },
-    
-    redrawCalibrationPolygon(cameraId) {
-        const calibData = this.calibrationData[`camera${cameraId}`];
-        const info = document.getElementById(`calibrationInfo${cameraId}`);
-        
-        if (calibData.points.length === 4 && calibData.pixelsPerMeter && calibData.cameraHeight) {
-            // Use the dedicated drawing function
-            this.drawCompleteCalibrationPolygon(cameraId);
-            
-            // Update info
-            const areaPixels = window.Utils ? 
-                window.Utils.calculatePolygonArea(calibData.points) : 
-                this.calculatePolygonAreaFallback(calibData.points);
-            const areaSquareMeters = areaPixels / (calibData.pixelsPerMeter * calibData.pixelsPerMeter);
-            
-            info.textContent = `3D Calibrated: ${areaSquareMeters.toFixed(2)} m² | H:${calibData.cameraHeight.toFixed(2)}m`;
-            info.classList.add('show');
-        }
     },
     
     saveCalibrationData() {
         try {
-            localStorage.setItem('truckVolumeCalibration', JSON.stringify(this.calibrationData));
+            const dataToSave = {
+                version: '2.0',
+                timestamp: new Date().toISOString(),
+                camera1: {
+                    points: this.calibrationData.camera1.points,
+                    pixelsPerMeter: this.calibrationData.camera1.pixelsPerMeter,
+                    edgeDistances: this.calibrationData.camera1.edgeDistances,
+                    visiblePoints: this.calibrationData.camera1.visiblePoints
+                },
+                camera2: {
+                    points: this.calibrationData.camera2.points,
+                    pixelsPerMeter: this.calibrationData.camera2.pixelsPerMeter,
+                    edgeDistances: this.calibrationData.camera2.edgeDistances,
+                    visiblePoints: this.calibrationData.camera2.visiblePoints
+                }
+            };
+            
+            // Save to localStorage
+            localStorage.setItem('truckVolumeCalibrationPoints', JSON.stringify(dataToSave));
+            console.log('Calibration data saved to localStorage');
+            
+            // Also save to backend server
+            fetch('/api/calibration/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(dataToSave)
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.status === 'success') {
+                    console.log('Calibration data saved to server:', result.path);
+                } else {
+                    console.warn('Failed to save to server:', result.message);
+                }
+            })
+            .catch(error => {
+                console.warn('Could not save calibration to server:', error);
+            });
+            
         } catch (e) {
             console.warn('Could not save calibration data:', e);
         }
     },
     
-    loadCalibrationData() {
+    async loadCalibrationData() {
+        console.log('=== LOADING SAVED CALIBRATION DATA ===');
         try {
-            const saved = localStorage.getItem('truckVolumeCalibration');
-            if (saved) {
-                const loaded = JSON.parse(saved);
-                for (let key in loaded) {
-                    if (this.calibrationData[key]) {
-                        this.calibrationData[key] = { ...this.calibrationData[key], ...loaded[key] };
-                        this.calibrationData[key].isCalibrating = false;
-                        this.calibrationData[key].redrawInterval = null; // Will be set when redrawing
-                    }
-                }
-                console.log('Loaded calibration data from localStorage');
+            console.log('Attempting to load calibration data...');
+            
+            // Try loading from server first
+            try {
+                console.log('Fetching from server: /api/calibration/load');
+                const response = await fetch('/api/calibration/load');
+                console.log('Server response status:', response.status, response.statusText);
                 
-                setTimeout(() => {
-                    // Redraw and start intervals for both cameras
-                    for (let cameraId = 1; cameraId <= 2; cameraId++) {
-                        const calibData = this.calibrationData[`camera${cameraId}`];
-                        if (calibData.points.length === 4 && calibData.pixelsPerMeter) {
-                            this.drawCompleteCalibrationPolygon(cameraId);
-                            
-                            // Start continuous redraw interval
-                            if (calibData.redrawInterval) {
-                                clearInterval(calibData.redrawInterval);
-                            }
-                            calibData.redrawInterval = setInterval(() => {
-                                this.drawCompleteCalibrationPolygon(cameraId);
-                            }, 2000);
-                        }
-                    }
-                }, 1000);
+                if (response.ok) {
+                    const loaded = await response.json();
+                    console.log('✓ Server calibration data received:', loaded);
+                    await this.restoreCalibrationFromData(loaded);
+                    console.log('✓ Loaded calibration from server');
+                    console.log('=== CALIBRATION DATA LOADING COMPLETE (SERVER) ===');
+                    return;
+                } else {
+                    console.log('Server returned non-OK status, trying localStorage...');
+                }
+            } catch (error) {
+                console.log('Server fetch failed:', error.message);
+                console.log('Trying localStorage fallback...');
+            }
+            
+            // Fallback to localStorage
+            console.log('Checking localStorage for: truckVolumeCalibrationPoints');
+            const saved = localStorage.getItem('truckVolumeCalibrationPoints');
+            
+            if (saved) {
+                console.log('✓ Found calibration data in localStorage');
+                const loaded = JSON.parse(saved);
+                console.log('localStorage data:', loaded);
+                await this.restoreCalibrationFromData(loaded);
+                console.log('✓ Loaded calibration from localStorage');
+                console.log('=== CALIBRATION DATA LOADING COMPLETE (LOCALSTORAGE) ===');
+            } else {
+                console.log('⚠ No saved calibration data found in localStorage');
+                console.log('=== NO CALIBRATION DATA FOUND ===');
             }
         } catch (e) {
-            console.warn('Could not load calibration data:', e);
+            console.error('✗ Could not load calibration data:', e);
+            console.log('=== CALIBRATION DATA LOADING ERROR ===');
         }
+    },
+    
+    async restoreCalibrationFromData(loaded) {
+        console.log('Restoring calibration from loaded data:', loaded);
+        
+        if (loaded.camera1 && loaded.camera1.points) {
+            this.calibrationData.camera1.points = loaded.camera1.points;
+            this.calibrationData.camera1.pixelsPerMeter = loaded.camera1.pixelsPerMeter;
+            
+            if (loaded.camera1.edgeDistances) {
+                this.calibrationData.camera1.edgeDistances = loaded.camera1.edgeDistances;
+            }
+            if (loaded.camera1.visiblePoints) {
+                this.calibrationData.camera1.visiblePoints = loaded.camera1.visiblePoints;
+            }
+            console.log('Camera 1 calibration data restored:', this.calibrationData.camera1);
+        }
+        
+        if (loaded.camera2 && loaded.camera2.points) {
+            this.calibrationData.camera2.points = loaded.camera2.points;
+            this.calibrationData.camera2.pixelsPerMeter = loaded.camera2.pixelsPerMeter;
+            
+            if (loaded.camera2.edgeDistances) {
+                this.calibrationData.camera2.edgeDistances = loaded.camera2.edgeDistances;
+            }
+            if (loaded.camera2.visiblePoints) {
+                this.calibrationData.camera2.visiblePoints = loaded.camera2.visiblePoints;
+            }
+            console.log('Camera 2 calibration data restored:', this.calibrationData.camera2);
+        }
+        
+        console.log('Restored calibration data:', {
+            camera1: loaded.camera1?.points?.length || 0,
+            camera2: loaded.camera2?.points?.length || 0,
+            timestamp: loaded.timestamp || 'unknown'
+        });
+        
+        // Auto-restore calibration polygons after a delay
+        console.log('Scheduling calibration polygon restoration...');
+        setTimeout(() => {
+            console.log('Attempting to restore calibration polygons...');
+            for (let cameraId = 1; cameraId <= 2; cameraId++) {
+                const calibData = this.calibrationData[`camera${cameraId}`];
+                const canvas = document.getElementById(`canvas${cameraId}`);
+                
+                console.log(`Camera ${cameraId} restore check:`, {
+                    pointsLength: calibData.points.length,
+                    pixelsPerMeter: calibData.pixelsPerMeter,
+                    canvasExists: !!canvas,
+                    canvasSize: canvas ? `${canvas.width}x${canvas.height}` : 'N/A',
+                    rawPoints: calibData.points
+                });
+                
+                if (calibData.points.length === 4 && calibData.pixelsPerMeter) {
+                    // Check if points need rescaling (if they're way outside canvas bounds)
+                    const needsRescaling = calibData.points.some(p => 
+                        Math.abs(p.x) > 2000 || Math.abs(p.y) > 2000
+                    );
+                    
+                    if (needsRescaling && canvas) {
+                        console.log(`⚠ Camera ${cameraId} points are off-scale! Applying rescale...`);
+                        
+                        // Find the bounding box of current points
+                        const minX = Math.min(...calibData.points.map(p => p.x));
+                        const maxX = Math.max(...calibData.points.map(p => p.x));
+                        const minY = Math.min(...calibData.points.map(p => p.y));
+                        const maxY = Math.max(...calibData.points.map(p => p.y));
+                        
+                        const savedWidth = maxX - minX;
+                        const savedHeight = maxY - minY;
+                        
+                        // Scale to fit current canvas with some margin
+                        const margin = 50;
+                        const targetWidth = canvas.width - (2 * margin);
+                        const targetHeight = canvas.height - (2 * margin);
+                        
+                        const scaleX = targetWidth / savedWidth;
+                        const scaleY = targetHeight / savedHeight;
+                        const scale = Math.min(scaleX, scaleY); // Use same scale for both to preserve aspect ratio
+                        
+                        // Rescale and center the points
+                        calibData.points = calibData.points.map(p => ({
+                            x: ((p.x - minX) * scale) + margin,
+                            y: ((p.y - minY) * scale) + margin
+                        }));
+                        
+                        console.log(`✓ Camera ${cameraId} points rescaled to fit canvas (scale: ${scale.toFixed(3)}):`, calibData.points);
+                    }
+                    
+                    console.log(`Restoring calibration for camera ${cameraId}...`);
+                    this.drawCompleteCalibrationPolygon(cameraId);
+                    
+                    // Start continuous redraw
+                    if (calibData.redrawInterval) {
+                        clearInterval(calibData.redrawInterval);
+                    }
+                    
+                    let redrawCount = 0;
+                    calibData.redrawInterval = setInterval(() => {
+                        redrawCount++;
+                        if (redrawCount % 10 === 0) { // Log every 10th redraw to avoid spam
+                            console.log(`[REDRAW INTERVAL] Camera ${cameraId} - Redraw #${redrawCount}`);
+                        }
+                        this.drawCompleteCalibrationPolygon(cameraId);
+                    }, 100); // Redraw every 100ms (10 times per second) for persistence
+                    
+                    console.log(`Calibration restored and redraw interval started for camera ${cameraId} (every 100ms)`);
+                    
+                    // Show notification
+                    if (window.Utils && cameraId === 2) {
+                        window.Utils.showNotification('Previous calibration restored', 'success');
+                    }
+                } else {
+                    console.log(`Camera ${cameraId} calibration not complete, skipping restore`);
+                }
+            }
+        }, 2000);  // Increased delay to 2 seconds
     },
     
     exportCalibration() {
@@ -1367,14 +1384,14 @@ window.CalibrationManager = {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'truck-volume-3d-calibration.json';
+        a.download = 'truck-volume-calibration-points.json';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
         if (window.Utils) {
-            window.Utils.showNotification('3D calibration data exported', 'success');
+            window.Utils.showNotification('Calibration points exported', 'success');
         }
     },
     
@@ -1389,20 +1406,30 @@ window.CalibrationManager = {
                 reader.onload = (e) => {
                     try {
                         const imported = JSON.parse(e.target.result);
-                        this.calibrationData = imported;
+                        
+                        if (imported.camera1) {
+                            this.calibrationData.camera1.points = imported.camera1.points || [];
+                            this.calibrationData.camera1.pixelsPerMeter = imported.camera1.pixelsPerMeter;
+                        }
+                        if (imported.camera2) {
+                            this.calibrationData.camera2.points = imported.camera2.points || [];
+                            this.calibrationData.camera2.pixelsPerMeter = imported.camera2.pixelsPerMeter;
+                        }
+                        
                         this.saveCalibrationData();
                         
                         setTimeout(() => {
-                            this.redrawCalibrationPolygon(1);
-                            this.redrawCalibrationPolygon(2);
+                            for (let i = 1; i <= 2; i++) {
+                                this.drawCompleteCalibrationPolygon(i);
+                            }
                         }, 500);
                         
                         if (window.Utils) {
-                            window.Utils.showNotification('3D calibration data imported', 'success');
+                            window.Utils.showNotification('Calibration points imported', 'success');
                         }
                     } catch (error) {
                         if (window.Utils) {
-                            window.Utils.showNotification('Failed to import calibration data', 'error');
+                            window.Utils.showNotification('Failed to import calibration', 'error');
                         }
                         console.error('Import error:', error);
                     }
@@ -1414,8 +1441,7 @@ window.CalibrationManager = {
     },
     
     resetCalibration() {
-        if (confirm('Reset all 3D calibration data? This cannot be undone.')) {
-            // Clear all redraw intervals
+        if (confirm('Reset all calibration data? This cannot be undone.')) {
             if (this.calibrationData.camera1.redrawInterval) {
                 clearInterval(this.calibrationData.camera1.redrawInterval);
             }
@@ -1423,53 +1449,26 @@ window.CalibrationManager = {
                 clearInterval(this.calibrationData.camera2.redrawInterval);
             }
             
-            this.calibrationData = {
-                camera1: { 
-                    points: [],
-                    edgeDistances: null,
-                    cameraDistances: null,
-                    isCalibrating: false, 
-                    pixelsPerMeter: null,
-                    cameraHeight: null,
-                    redrawInterval: null,
-                    calibrationCanvasWidth: null,
-                    calibrationCanvasHeight: null
-                },
-                camera2: { 
-                    points: [],
-                    edgeDistances: null,
-                    cameraDistances: null,
-                    isCalibrating: false, 
-                    pixelsPerMeter: null,
-                    cameraHeight: null,
-                    redrawInterval: null,
-                    calibrationCanvasWidth: null,
-                    calibrationCanvasHeight: null
-                }
-            };
-            
-            ['canvas1', 'canvas2'].forEach(canvasId => {
-                const canvas = document.getElementById(canvasId);
+            for (let i = 1; i <= 2; i++) {
+                this.calibrationData[`camera${i}`].points = [];
+                this.calibrationData[`camera${i}`].isCalibrating = false;
+                this.calibrationData[`camera${i}`].pixelsPerMeter = null;
+                this.calibrationData[`camera${i}`].redrawInterval = null;
+                
+                const canvas = document.getElementById(`canvas${i}`);
                 if (canvas) {
                     const ctx = canvas.getContext('2d');
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                 }
-            });
-            
-            ['calibrationInfo1', 'calibrationInfo2'].forEach(infoId => {
-                const info = document.getElementById(infoId);
+                
+                const info = document.getElementById(`calibrationInfo${i}`);
                 if (info) info.classList.remove('show');
-            });
+            }
             
             const cameraContainer = document.querySelector('.camera-container');
             if (cameraContainer) {
                 cameraContainer.classList.remove('calibrating');
             }
-            
-            document.querySelectorAll('.btn-calibrate').forEach(btn => {
-                btn.classList.remove('calibrating');
-                btn.querySelector('.btn-text').textContent = 'Calibrate';
-            });
             
             document.querySelectorAll('.camera-feed').forEach(feed => {
                 feed.classList.remove('calibrating-active');
@@ -1481,7 +1480,7 @@ window.CalibrationManager = {
             
             this.saveCalibrationData();
             if (window.Utils) {
-                window.Utils.showNotification('All 3D calibration data reset', 'info');
+                window.Utils.showNotification('All calibration data reset', 'info');
             }
         }
     },
@@ -1491,14 +1490,14 @@ window.CalibrationManager = {
         return !!(
             calibData.pixelsPerMeter && 
             calibData.points.length === 4 &&
-            calibData.cameraHeight &&
-            calibData.edgeDistances &&
-            calibData.cameraDistances
+            calibData.edgeDistances
         );
     },
     
     has3DCalibration(cameraId) {
         const calibData = this.calibrationData[`camera${cameraId}`];
+        // 3D calibration requires camera height and camera distances to corners
+        // This is used for volume calculation only, not for drawing the zone
         return !!(
             calibData.cameraHeight &&
             calibData.cameraDistances &&
@@ -1531,6 +1530,39 @@ window.CalibrationManager = {
         return null;
     },
     
+    /**
+     * Manual function to force redraw calibration polygons
+     */
+    forceRedrawCalibrations() {
+        console.log('=== FORCING CALIBRATION REDRAW ===');
+        for (let cameraId = 1; cameraId <= 2; cameraId++) {
+            const calibData = this.calibrationData[`camera${cameraId}`];
+            const canvas = document.getElementById(`canvas${cameraId}`);
+            
+            console.log(`Camera ${cameraId} check:`, {
+                pointsLength: calibData.points.length,
+                pixelsPerMeter: calibData.pixelsPerMeter,
+                canvasExists: !!canvas,
+                canvasSize: canvas ? `${canvas.width}x${canvas.height}` : 'N/A'
+            });
+            
+            if (calibData.points.length === 4 && calibData.pixelsPerMeter && canvas) {
+                console.log(`Drawing calibration for camera ${cameraId}...`);
+                this.drawCompleteCalibrationPolygon(cameraId);
+            } else {
+                console.log(`Cannot draw camera ${cameraId}: incomplete data`);
+            }
+        }
+        console.log('=== REDRAW COMPLETE ===');
+    },
+    
+    /**
+     * Alias for drawCompleteCalibrationPolygon (for backward compatibility)
+     */
+    redrawCalibrationPolygon(cameraId) {
+        this.drawCompleteCalibrationPolygon(cameraId);
+    },
+    
     getCalibrationSummary() {
         const summary = {};
         
@@ -1549,33 +1581,5 @@ window.CalibrationManager = {
         }
         
         return summary;
-    },
-    
-    isAnyCalibrating() {
-        return Object.values(this.calibrationData).some(data => data.isCalibrating);
-    },
-    
-    cancelActiveCalibrations() {
-        for (let cameraId = 1; cameraId <= 2; cameraId++) {
-            if (this.calibrationData[`camera${cameraId}`].isCalibrating) {
-                this.clearCalibration(cameraId);
-            }
-        }
-    },
-    
-    finishCalibrationProcess(cameraId) {
-        const calibData = this.calibrationData[`camera${cameraId}`];
-        
-        if (calibData.points.length !== 2) {
-            if (window.Utils) {
-                window.Utils.showNotification(
-                    `Need exactly 2 points. Currently have ${calibData.points.length}. Continue clicking.`,
-                    'error'
-                );
-            }
-            return;
-        }
-        
-        this.collectAllDistances(cameraId);
     }
 };

@@ -27,18 +27,19 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 8px;
-            font-size: 0.9em;
+            font-size: 0.85em;
         }
         
         .status-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            padding: 4px 0;
         }
         
         .status-label {
             color: #b0b0b0;
-            font-size: 0.85em;
+            font-size: 0.9em;
         }
         
         .status-value {
@@ -53,6 +54,19 @@
         .status-value.quality-good { color: #45b7d1; }
         .status-value.quality-fair { color: #f9ca24; }
         .status-value.quality-poor { color: #eb4d4b; }
+        
+        .status-section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .status-section-title {
+            font-size: 0.95em;
+            font-weight: 600;
+            color: #4ecdc4;
+            margin-bottom: 8px;
+        }
         
         .volume-alternatives {
             display: flex;
@@ -294,10 +308,6 @@
                     <div class="status-header">3D Calibration Status</div>
                     <div class="status-grid">
                         <div class="status-item">
-                            <span class="status-label">Camera Height:</span>
-                            <span class="status-value" id="cameraHeight1">Not set</span>
-                        </div>
-                        <div class="status-item">
                             <span class="status-label">Calibration:</span>
                             <span class="status-value" id="calibrationType1">None</span>
                         </div>
@@ -305,9 +315,43 @@
                             <span class="status-label">Quality:</span>
                             <span class="status-value" id="calibrationQuality1">-</span>
                         </div>
-                        <div class="status-item">
-                            <span class="status-label">Avg Distance:</span>
-                            <span class="status-value" id="avgDistance1">-</span>
+                    </div>
+                    
+                    <!-- Configuration Data Section -->
+                    <div class="status-section">
+                        <div class="status-section-title">Configuration</div>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="status-label">Camera Height:</span>
+                                <span class="status-value" id="cameraHeight1">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">Visible Points:</span>
+                                <span class="status-value" id="visiblePoints1">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Camera Distances Section -->
+                    <div class="status-section">
+                        <div class="status-section-title">Camera Distances</div>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="status-label">C1 (Cam→P1):</span>
+                                <span class="status-value" id="c1Distance1">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">C2 (Cam→P2):</span>
+                                <span class="status-value" id="c2Distance1">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">C3 (Cam→P3):</span>
+                                <span class="status-value" id="c3Distance1">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">C4 (Cam→P4):</span>
+                                <span class="status-value" id="c4Distance1">-</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -348,10 +392,6 @@
                     <div class="status-header">3D Calibration Status</div>
                     <div class="status-grid">
                         <div class="status-item">
-                            <span class="status-label">Camera Height:</span>
-                            <span class="status-value" id="cameraHeight2">Not set</span>
-                        </div>
-                        <div class="status-item">
                             <span class="status-label">Calibration:</span>
                             <span class="status-value" id="calibrationType2">None</span>
                         </div>
@@ -359,9 +399,43 @@
                             <span class="status-label">Quality:</span>
                             <span class="status-value" id="calibrationQuality2">-</span>
                         </div>
-                        <div class="status-item">
-                            <span class="status-label">Avg Distance:</span>
-                            <span class="status-value" id="avgDistance2">-</span>
+                    </div>
+                    
+                    <!-- Configuration Data Section -->
+                    <div class="status-section">
+                        <div class="status-section-title">Configuration</div>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="status-label">Camera Height:</span>
+                                <span class="status-value" id="cameraHeight2">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">Visible Points:</span>
+                                <span class="status-value" id="visiblePoints2">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Camera Distances Section -->
+                    <div class="status-section">
+                        <div class="status-section-title">Camera Distances</div>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="status-label">C1 (Cam→P1):</span>
+                                <span class="status-value" id="c1Distance2">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">C2 (Cam→P2):</span>
+                                <span class="status-value" id="c2Distance2">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">C3 (Cam→P3):</span>
+                                <span class="status-value" id="c3Distance2">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">C4 (Cam→P4):</span>
+                                <span class="status-value" id="c4Distance2">-</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -439,7 +513,7 @@
         // Enhanced UI functions for 3D calibration display
         
         /**
-         * Update calibration status display
+         * Update calibration status display with all configuration data
          */
         function updateCalibrationStatus() {
             if (!window.CalibrationManager) return;
@@ -452,7 +526,14 @@
                 const heightElement = document.getElementById(`cameraHeight${cameraId}`);
                 if (heightElement) {
                     heightElement.textContent = calibData.cameraHeight ? 
-                        `${calibData.cameraHeight.toFixed(2)}m` : 'Not set';
+                        `${calibData.cameraHeight.toFixed(2)}m` : '-';
+                }
+                
+                // Update visible points
+                const visiblePointsElement = document.getElementById(`visiblePoints${cameraId}`);
+                if (visiblePointsElement) {
+                    visiblePointsElement.textContent = calibData.visiblePoints ? 
+                        calibData.visiblePoints.join(', ') : '-';
                 }
                 
                 // Update calibration type
@@ -481,12 +562,21 @@
                     qualityElement.className = 'status-value';
                 }
                 
-                // Update average distance
-                const distanceElement = document.getElementById(`avgDistance${cameraId}`);
-                if (distanceElement && calib3D) {
-                    distanceElement.textContent = `${calib3D.averageHorizontalDistance.toFixed(1)}m`;
-                } else if (distanceElement) {
-                    distanceElement.textContent = '-';
+                // Update camera distances
+                if (calibData.cameraDistances) {
+                    const c1Element = document.getElementById(`c1Distance${cameraId}`);
+                    const c2Element = document.getElementById(`c2Distance${cameraId}`);
+                    const c3Element = document.getElementById(`c3Distance${cameraId}`);
+                    const c4Element = document.getElementById(`c4Distance${cameraId}`);
+                    
+                    if (c1Element) c1Element.textContent = calibData.cameraDistances.C1 ? 
+                        `${calibData.cameraDistances.C1.toFixed(1)}m` : '-';
+                    if (c2Element) c2Element.textContent = calibData.cameraDistances.C2 ? 
+                        `${calibData.cameraDistances.C2.toFixed(1)}m` : '-';
+                    if (c3Element) c3Element.textContent = calibData.cameraDistances.C3 ? 
+                        `${calibData.cameraDistances.C3.toFixed(1)}m` : '-';
+                    if (c4Element) c4Element.textContent = calibData.cameraDistances.C4 ? 
+                        `${calibData.cameraDistances.C4.toFixed(1)}m` : '-';
                 }
             }
         }

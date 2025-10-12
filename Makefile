@@ -89,8 +89,8 @@ run: build
 	@docker run -p 80:80 ${DOCKER_RUN_PARAMS} bash -c "\
 		python3 ./app.py \
 			--model runs/segment/yolo11n-seg/weights/best.pt \
-			--source1 rtsp://Streamer:EFEVsaNLMY84yAW@proxy50.rt3.io:35291/Streaming/Channels/1/ \
-			--source2 rtsp://Streamer:EFEVsaNLMY84yAW@proxy50.rt3.io:35292/Streaming/Channels/1/ "
+			--source1 rtsp://Streamer:EFEVsaNLMY84yAW@proxy50.rt3.io:35388/Streaming/Channels/1/ \
+			--source2 rtsp://Streamer:EFEVsaNLMY84yAW@proxy052.r3proxy.com:39693/Streaming/Channels/1/ "
 
 #----------------------------------------------------------------------------------------------------------------------
 # Helper functions

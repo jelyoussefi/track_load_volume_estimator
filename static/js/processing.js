@@ -403,8 +403,8 @@ window.ProcessingManager = {
         const delay = window.CONFIG ? window.CONFIG.TIMING.STREAM_REFRESH_DELAY : 1000;
         setTimeout(() => {
             if (window.CalibrationManager) {
-                window.CalibrationManager.redrawCalibrationPolygon(1);
-                window.CalibrationManager.redrawCalibrationPolygon(2);
+                window.CalibrationManager.drawCompleteCalibrationPolygon(1);
+                window.CalibrationManager.drawCompleteCalibrationPolygon(2);
             }
         }, delay);
         

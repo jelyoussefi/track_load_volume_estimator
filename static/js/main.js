@@ -46,7 +46,7 @@ function initializeApp() {
         AppState.initialized = true;
         
         console.log('Application initialized successfully');
-        console.log('Available debug functions: debugStats(), debugCalibration(), exportCalibration(), importCalibration(), resetCalibration()');
+        console.log('Available debug functions: debugStats(), debugCalibration(), exportCalibration(), importCalibration(), resetCalibration(), forceRedrawCalibrations()');
         console.log('Keyboard shortcuts: R (refresh), S (toggle stats), Ctrl+C (clear calibrations), Escape (cancel calibration), H (help)');
         
     } catch (error) {
@@ -100,6 +100,12 @@ function setupDebugFunctions() {
     
     window.resetCalibration = () => {
         calibrationManager.resetCalibration();
+    };
+    
+    window.forceRedrawCalibrations = () => {
+        if (calibrationManager) {
+            calibrationManager.forceRedrawCalibrations();
+        }
     };
     
     window.getAppStatus = () => {

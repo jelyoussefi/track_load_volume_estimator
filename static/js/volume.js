@@ -77,11 +77,10 @@ window.VolumeCalculator = {
      * @returns {number} 3D volume estimate for this camera
      */
     calculate3DCameraVolume(cameraStats, calibData, cameraId) {
-        const { cameraHeight, cornerDistances, pixelsPerMeter, points } = calibData;
+        const { cameraHeight, cameraDistances, pixelsPerMeter, points } = calibData;
         const detectedAreaPixels = cameraStats.total_area || 0;
         
-        if (!cameraHeight || !cornerDistances || cornerDistances.length !== 4 || !pixelsPerMeter) {
-            console.warn(`Camera ${cameraId}: Incomplete 3D calibration data`);
+        if (!cameraHeight || !cameraDistances || !pixelsPerMeter || !points || points.length !== 4) {
             return 0;
         }
         
@@ -94,8 +93,13 @@ window.VolumeCalculator = {
         // Calculate the detected area in square meters
         const detectedAreaSquareMeters = detectedAreaPixels / (pixelsPerMeter * pixelsPerMeter);
         
-        // Calculate average distance from camera to truck bed
-        const avgDistance = cornerDistances.reduce((sum, corner) => sum + corner.distance, 0) / cornerDistances.length;
+        // Calculate average distance from camera to truck bed corners
+        const avgDistance = (
+            cameraDistances.C1 + 
+            cameraDistances.C2 + 
+            cameraDistances.C3 + 
+            cameraDistances.C4
+        ) / 4;
         
         // Calculate height estimation using 3D geometry
         const heightEstimate = this.estimate3DHeight(
@@ -108,9 +112,6 @@ window.VolumeCalculator = {
         
         // Calculate volume
         const volume = detectedAreaSquareMeters * heightEstimate;
-        
-        const formatNumber = window.Utils ? window.Utils.formatNumber : (num => num.toFixed(2));
-        console.log(`Camera ${cameraId} 3D volume: ${formatNumber(volume)} m³ (area: ${formatNumber(detectedAreaSquareMeters)} m², height: ${formatNumber(heightEstimate)} m, cam height: ${formatNumber(cameraHeight)} m)`);
         
         return volume;
     },
@@ -209,9 +210,6 @@ window.VolumeCalculator = {
         
         const volume = areaSquareMeters * heightEstimate;
         
-        const formatNumber = window.Utils ? window.Utils.formatNumber : (num => num.toFixed(2));
-        console.log(`Camera ${cameraId} 2D volume: ${formatNumber(volume)} m³ (area: ${formatNumber(areaSquareMeters)} m², height: ${formatNumber(heightEstimate)} m)`);
-        
         return volume;
     },
     
@@ -292,9 +290,6 @@ window.VolumeCalculator = {
         }
         
         const weightedVolume = (volume1 * weight1) + (volume2 * weight2);
-        
-        const formatNumber = window.Utils ? window.Utils.formatNumber : (num => num.toFixed(2));
-        console.log(`Stereo volume: ${formatNumber(weightedVolume)} m³ (cam1: ${formatNumber(volume1)}, cam2: ${formatNumber(volume2)}, weights: ${formatNumber(weight1, 2)}/${formatNumber(weight2, 2)})`);
         
         return weightedVolume;
     },
