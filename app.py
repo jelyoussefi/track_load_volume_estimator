@@ -529,7 +529,7 @@ def start_processing():
         model_path = data.get('model_path', 'yolo11n-seg.pt')
         source1 = data.get('source1', 0)
         source2 = data.get('source2', 1)
-        confidence = data.get('confidence', 0.5)
+        confidence = data.get('confidence', 0.7)
         
         if yolo_processor:
             yolo_processor.stop_streams()
@@ -576,7 +576,7 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='Dual Camera YOLO Flask Server')
     parser.add_argument('--host', default='0.0.0.0', help='Host address')
-    parser.add_argument('--port', type=int, default=5000, help='Port number')
+    parser.add_argument('--port', type=int, default=80, help='Port number')
     parser.add_argument('--model', default='yolo11n-seg.pt', help='YOLO model path')
     parser.add_argument('--source1', default=0, help='Camera 1 source')
     parser.add_argument('--source2', default=1, help='Camera 2 source')

@@ -86,11 +86,11 @@ test: build
 
 run: build
 	@$(call msg, Running the application ...)
-	@docker run -p 5000:5000 ${DOCKER_RUN_PARAMS} bash -c "\
+	@docker run -p 80:80 ${DOCKER_RUN_PARAMS} bash -c "\
 		python3 ./app.py \
 			--model runs/segment/yolo11n-seg/weights/best.pt \
-			--source1 streams/cam_1.mp4 \
-			--source2 streams/cam_2.mp4 "
+			--source1 rtsp://Streamer:EFEVsaNLMY84yAW@proxy50.rt3.io:35291/Streaming/Channels/1/ \
+			--source2 rtsp://Streamer:EFEVsaNLMY84yAW@proxy50.rt3.io:35292/Streaming/Channels/1/ "
 
 #----------------------------------------------------------------------------------------------------------------------
 # Helper functions
