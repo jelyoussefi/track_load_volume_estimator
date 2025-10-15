@@ -77,11 +77,31 @@ window.VolumeCalculator = {
      * @returns {number} 3D volume estimate for this camera
      */
     calculate3DCameraVolume(cameraStats, calibData, cameraId) {
-        const { cameraHeight, cameraDistances, pixelsPerMeter, points } = calibData;
+        const { cameraHeight, effectiveCameraHeight, truckBedHeight, cameraDistances, pixelsPerMeter, points } = calibData;
         const detectedAreaPixels = cameraStats.total_area || 0;
         
-        if (!cameraHeight || !cameraDistances || !pixelsPerMeter || !points || points.length !== 4) {
+        // Use effective camera height if available (camera height above truck bed)
+        // Otherwise fall back to absolute camera height
+        const heightToUse = effectiveCameraHeight !== null && effectiveCameraHeight !== undefined ? 
+            effectiveCameraHeight : cameraHeight;
+        
+        if (!heightToUse || !cameraDistances || !pixelsPerMeter || !points || points.length !== 4) {
+            console.warn(`Camera ${cameraId}: Missing calibration data for 3D volume calculation`, {
+                heightToUse,
+                effectiveCameraHeight,
+                cameraHeight,
+                hasCameraDistances: !!cameraDistances,
+                hasPixelsPerMeter: !!pixelsPerMeter,
+                pointsLength: points?.length
+            });
             return 0;
+        }
+        
+        // Log which height is being used
+        if (effectiveCameraHeight !== null && effectiveCameraHeight !== undefined) {
+            console.log(`Camera ${cameraId}: Using effective camera height ${effectiveCameraHeight.toFixed(2)}m (absolute: ${cameraHeight}m, truck bed: ${truckBedHeight}m)`);
+        } else {
+            console.log(`Camera ${cameraId}: Using absolute camera height ${cameraHeight.toFixed(2)}m (truck bed height not configured)`);
         }
         
         // Calculate the real-world area of the calibration region
@@ -101,31 +121,44 @@ window.VolumeCalculator = {
             cameraDistances.C4
         ) / 4;
         
-        // Calculate height estimation using 3D geometry
+        // Calculate height estimation using 3D geometry with effective height
         const heightEstimate = this.estimate3DHeight(
             detectedAreaPixels,
             calibAreaPixels,
-            cameraHeight,
+            heightToUse,  // Use effective height here
             avgDistance,
-            pixelsPerMeter
+            pixelsPerMeter,
+            truckBedHeight  // Pass truck bed height for additional corrections
         );
         
         // Calculate volume
         const volume = detectedAreaSquareMeters * heightEstimate;
+        
+        console.log(`Camera ${cameraId} volume calculation:`, {
+            detectedArea: detectedAreaSquareMeters.toFixed(2) + ' m²',
+            calibArea: calibAreaSquareMeters.toFixed(2) + ' m²',
+            fillRatio: (detectedAreaPixels / calibAreaPixels * 100).toFixed(1) + '%',
+            effectiveHeight: heightToUse.toFixed(2) + 'm',
+            estimatedPileHeight: heightEstimate.toFixed(2) + 'm',
+            volume: volume.toFixed(3) + ' m³'
+        });
         
         return volume;
     },
     
     /**
      * Estimate 3D height using camera geometry and detection data
+     * UPDATED: Now uses effective camera height (height above truck bed)
+     * 
      * @param {number} detectedAreaPixels - Detected brick area in pixels
      * @param {number} calibAreaPixels - Calibration area in pixels
-     * @param {number} cameraHeight - Height of camera above truck bed
+     * @param {number} effectiveCameraHeight - Height of camera ABOVE TRUCK BED (not ground)
      * @param {number} avgDistance - Average distance from camera to corners
      * @param {number} pixelsPerMeter - Calibration pixels per meter
-     * @returns {number} Estimated height in meters
+     * @param {number} truckBedHeight - Height of truck bed above ground (for display/logging)
+     * @returns {number} Estimated height of brick pile in meters (above truck bed)
      */
-    estimate3DHeight(detectedAreaPixels, calibAreaPixels, cameraHeight, avgDistance, pixelsPerMeter) {
+    estimate3DHeight(detectedAreaPixels, calibAreaPixels, effectiveCameraHeight, avgDistance, pixelsPerMeter, truckBedHeight) {
         if (calibAreaPixels === 0 || detectedAreaPixels === 0) return 0;
         
         // Calculate fill ratio (how much of the calibrated area is covered by bricks)
@@ -136,27 +169,72 @@ window.VolumeCalculator = {
         const minHeight = window.CONFIG ? window.CONFIG.VOLUME.MIN_TRUCK_HEIGHT : 0.1;
         
         // Enhanced height estimation using 3D geometry
-        // This considers the viewing angle and perspective distortion
+        // IMPORTANT: effectiveCameraHeight is the height ABOVE the truck bed
+        // This is the actual height difference between camera and load surface
         
         // Calculate horizontal distance to truck bed
-        const horizontalDistance = Math.sqrt(avgDistance * avgDistance - cameraHeight * cameraHeight);
+        // Using Pythagorean theorem: horizontal_distance² = total_distance² - height²
+        const horizontalDistance = Math.sqrt(
+            Math.max(0, avgDistance * avgDistance - effectiveCameraHeight * effectiveCameraHeight)
+        );
         
         // Calculate viewing angle (angle between camera direction and vertical)
-        const viewingAngle = Math.atan(horizontalDistance / cameraHeight);
+        // This is the angle from vertical down to the line-of-sight to the truck bed
+        const viewingAngle = Math.atan2(horizontalDistance, effectiveCameraHeight);
+        
+        // Log geometry for debugging
+        if (Math.random() < 0.1) {  // Log 10% of the time to avoid spam
+            console.log('3D Height Estimation Geometry:', {
+                fillRatio: (fillRatio * 100).toFixed(1) + '%',
+                effectiveCameraHeight: effectiveCameraHeight.toFixed(2) + 'm',
+                avgDistance: avgDistance.toFixed(2) + 'm',
+                horizontalDistance: horizontalDistance.toFixed(2) + 'm',
+                viewingAngleDeg: (viewingAngle * 180 / Math.PI).toFixed(1) + '°',
+                truckBedHeight: truckBedHeight ? truckBedHeight.toFixed(2) + 'm' : 'not set'
+            });
+        }
         
         // Adjust height estimation based on viewing angle and fill ratio
         // More vertical viewing (smaller angle) = more accurate height detection
+        // Steeper angle requires correction as perspective distortion increases
         const angleCorrection = 1.0 + (viewingAngle / (Math.PI / 2)) * 0.3; // 0-30% correction
         
-        // Base height estimation
-        let estimatedHeight = minHeight + (fillRatio * (maxHeight - minHeight));
+        // Base height estimation from fill ratio
+        // This is a non-linear relationship: as more area is covered, height increases
+        // Using a slightly curved relationship (square root) for more realistic estimates
+        let estimatedHeight = minHeight + (Math.sqrt(fillRatio) * (maxHeight - minHeight));
         
         // Apply perspective correction
         estimatedHeight *= angleCorrection;
         
-        // Apply distance-based correction (further distances may underestimate height)
-        const distanceCorrection = 1.0 + Math.max(0, (horizontalDistance - 5.0) * 0.05); // 5% per meter beyond 5m
+        // Apply distance-based correction
+        // Further distances may underestimate height due to perspective
+        // Add 5% correction per meter beyond 5m horizontal distance
+        const distanceCorrection = 1.0 + Math.max(0, (horizontalDistance - 5.0) * 0.05);
         estimatedHeight *= distanceCorrection;
+        
+        // Truck bed height correction
+        // If we know the truck bed height, we can apply additional corrections
+        // based on the ratio of camera height to truck bed height
+        if (truckBedHeight && truckBedHeight > 0) {
+            // When effective camera height is small relative to truck bed height,
+            // the viewing angle is very steep and we see more of the pile
+            const heightRatio = effectiveCameraHeight / truckBedHeight;
+            
+            if (heightRatio < 2.5) {  // Camera less than 2.5x truck bed height
+                // Steep viewing angle - apply additional correction
+                const steepAngleCorrection = 1.0 + (2.5 - heightRatio) * 0.1; // Up to 25% correction
+                estimatedHeight *= steepAngleCorrection;
+                
+                if (Math.random() < 0.1) {
+                    console.log('Applied steep angle correction:', {
+                        heightRatio: heightRatio.toFixed(2),
+                        steepAngleCorrection: steepAngleCorrection.toFixed(3),
+                        reason: 'Camera close to truck bed height - steep viewing angle'
+                    });
+                }
+            }
+        }
         
         // Ensure reasonable bounds
         estimatedHeight = Math.max(minHeight, Math.min(maxHeight, estimatedHeight));

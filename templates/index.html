@@ -775,11 +775,13 @@
         
         // Enhanced volume display update
         if (window.StatsManager) {
-            const originalUpdateVolumeDisplay = window.StatsManager.updateVolumeDisplay;
-            window.StatsManager.updateVolumeDisplay = function(volume) {
-                originalUpdateVolumeDisplay.call(this, volume);
-                updateVolumeDisplay(volume);
-            };
+            const originalUpdateVolumeDisplay = window.StatsManager.updateEnhancedVolumeDisplay;
+            if (originalUpdateVolumeDisplay) {
+                window.StatsManager.updateEnhancedVolumeDisplay = function(volume, stats) {
+                    originalUpdateVolumeDisplay.call(this, volume, stats);
+                    updateVolumeDisplay(volume);
+                };
+            }
         }
         
         // Initialize enhanced UI when DOM is ready

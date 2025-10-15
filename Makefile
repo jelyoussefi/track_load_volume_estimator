@@ -9,6 +9,7 @@ MODEL_SIZE ?= n
 IMAGE_SIZE ?= 640
 BATCH_SIZE ?= 16
 EPOCHS ?= 20
+FREEZE ?= 10
 TEST_IMAGE ?= ./datasets/building_materials/test/images/image_0058_jpg.rf.1b776fae09f8c75d003413923a30af00.jpg
 
 MODEL_NAME = yolo11${MODEL_SIZE}-seg
@@ -45,14 +46,13 @@ build:
 	@docker build . -t ${DOCKER_IMAGE_NAME}
 
 train: build
-	@$(call msg, Training the ${MODEL_NAME} model for helmet detection on ${DEVICE} ...)
+	@$(call msg, Training the ${MODEL_NAME} model for brick detection on ${DEVICE} ...)
 	@sudo rm -rf ./runs/segment/${MODEL_NAME}*
 	@docker run ${DOCKER_RUN_PARAMS} \
 		yolo segment train \
 			model=${MODEL_NAME}.pt name=${MODEL_NAME} data=building_materials.yaml \
-			imgsz=${IMAGE_SIZE} epochs=${EPOCHS} batch=${BATCH_SIZE} device=${DEVICE}
+			imgsz=${IMAGE_SIZE} epochs=${EPOCHS} batch=${BATCH_SIZE} device=${DEVICE} freeze=${FREEZE}
 
-# Monitoring the training
 monitor: build
 	@$(call msg, Starting TensorBoard monitoring on ${DEVICE} ...)
 	docker run -p 6002:6002 ${DOCKER_RUN_PARAMS}  \
@@ -60,7 +60,6 @@ monitor: build
 		[ '$(DEVICE)' = 'CPU' ] && export CUDA_VISIBLE_DEVICES='' || true && \
 		tensorboard --logdir=runs --bind_all --port=6006"
 
-# Export the model to different formats
 export: build
 	@$(call msg, Exporting ${MODEL_NAME} model ...)
 	@docker run ${DOCKER_RUN_PARAMS} \
@@ -68,7 +67,6 @@ export: build
 			model=runs/${TASK}/${MODEL_NAME}/weights/best.pt \
 			format=openvino imgsz=${IMAGE_SIZE}
 
-# Test the model with an input image
 test: build
 	@$(call msg, Running inference on ${TEST_IMAGE} using ${MODEL_NAME} model ...)
 	@docker run ${DOCKER_RUN_PARAMS} bash -c "\
@@ -89,8 +87,14 @@ run: build
 	@docker run -p 80:80 ${DOCKER_RUN_PARAMS} bash -c "\
 		python3 ./app.py \
 			--model runs/segment/yolo11n-seg/weights/best.pt \
-			--source1 rtsp://Streamer:EFEVsaNLMY84yAW@proxy50.rt3.io:35388/Streaming/Channels/1/ \
-			--source2 rtsp://Streamer:EFEVsaNLMY84yAW@proxy052.r3proxy.com:39693/Streaming/Channels/1/ "
+			--conf 0.7 \
+			--source1 ./streams/cam_1.mp4 \
+			--source2 ./streams/cam_2.mp4 \
+			--source1 rtsp://Streamer:EFEVsaNLMY84yAW@proxy50.rt3.io:39381/Streaming/Channels/1/ \
+			--source2 rtsp://Streamer:EFEVsaNLMY84yAW@proxy50.rt3.io:39378/Streaming/Channels/1/ "
+			
+#			--source1 ./streams/cam_1.mp4 \
+#			--source2 ./streams/cam_2.mp4 "
 
 #----------------------------------------------------------------------------------------------------------------------
 # Helper functions

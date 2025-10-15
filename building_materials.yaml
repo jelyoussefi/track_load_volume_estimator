@@ -5,3 +5,4 @@ val: 'valid/images'
 # class names
 names: 
   0: 'bricks'
+  1: 'truck'

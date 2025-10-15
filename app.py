@@ -45,7 +45,7 @@ calibration_config_path = None
 class DualCameraYOLO:
     """Dual camera YOLO processing engine"""
     
-    def __init__(self, model_path: str, confidence: float = 0.5):
+    def __init__(self, model_path: str, confidence: float = 0.7):
         self.model_path = model_path
         self.confidence = confidence
         self.model = None
@@ -662,7 +662,7 @@ if __name__ == '__main__':
     parser.add_argument('--model', default='yolo11n-seg.pt', help='YOLO model path')
     parser.add_argument('--source1', default=0, help='Camera 1 source')
     parser.add_argument('--source2', default=1, help='Camera 2 source')
-    parser.add_argument('--conf', type=float, default=0.5, help='Confidence threshold')
+    parser.add_argument('--conf', type=float, default=0.6, help='Confidence threshold')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     parser.add_argument('--no-auto-start', action='store_true', help='Disable auto-start processing')
     parser.add_argument('--calibration-config', default='./calibration.json', help='Path to calibration config JSON file')

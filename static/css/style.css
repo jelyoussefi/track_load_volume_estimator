@@ -1,4 +1,4 @@
-/* Dual Camera YOLO Web Interface Styles - Updated for Modular Architecture */
+/* style.css - COMPLETE UPDATED FILE */
 
 * {
     margin: 0;
@@ -177,6 +177,8 @@ body {
     line-height: 0;
 }
 
+/* style.css - Updated z-index section */
+
 .video-stream {
     width: 100%;
     height: auto;
@@ -184,6 +186,8 @@ body {
     display: block;
     background: #000;
     border-radius: 10px;
+    position: relative;
+    z-index: 10;  /* Video on top */
 }
 
 .calibration-canvas {
@@ -193,13 +197,14 @@ body {
     width: 100%;
     height: 100%;
     pointer-events: none;
-    z-index: 10;
+    z-index: 1;  /* Calibration behind video */
     border-radius: 10px;
 }
 
 .calibration-canvas.active {
     pointer-events: all;
     cursor: crosshair;
+    z-index: 15;  /* When active, go on top for interaction */
 }
 
 .calibration-info {
@@ -213,7 +218,7 @@ body {
     font-size: 0.8em;
     font-weight: 500;
     line-height: 1.8;
-    z-index: 15;
+    z-index: 20;  /* Info box on top */
     display: none;
     border: 2px solid #4ecdc4;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
