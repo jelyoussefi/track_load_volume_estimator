@@ -5,13 +5,13 @@ SHELL:=/bin/bash
 CURRENT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 
 TASK ?= segment
-MODEL_SIZE ?= n
+MODEL_SIZE ?= m
 IMAGE_SIZE ?= 640
 BATCH_SIZE ?= 16
 EPOCHS ?= 20
 FREEZE ?= 10
-TEST_IMAGE ?= ./datasets/building_materials/test/images/image_0058_jpg.rf.1b776fae09f8c75d003413923a30af00.jpg
-
+#TEST_IMAGE ?= ./datasets/building_materials/test/images/image_0058_jpg.rf.1b776fae09f8c75d003413923a30af00.jpg
+TEST_IMAGE = ./truck.png
 MODEL_NAME = yolo11${MODEL_SIZE}-seg
 
 DEVICE = CPU
@@ -69,9 +69,9 @@ export: build
 
 test: build
 	@$(call msg, Running inference on ${TEST_IMAGE} using ${MODEL_NAME} model ...)
-	@docker run ${DOCKER_RUN_PARAMS} bash -c "\
+	docker run ${DOCKER_RUN_PARAMS} bash -c "\
 		yolo segment predict \
-			model=runs/${TASK}/${MODEL_NAME}/weights/best.pt \
+			model=${MODEL_NAME}  \
 			source=${TEST_IMAGE} \
 			imgsz=${IMAGE_SIZE} \
 			save=True \
@@ -84,18 +84,13 @@ test: build
 
 run: build
 	@$(call msg, Running the application ...)
-	@docker run -p 80:80 ${DOCKER_RUN_PARAMS} bash -c "\
+	docker run -p 80:80 ${DOCKER_RUN_PARAMS} bash -c "\
 		python3 ./app.py \
-			--model runs/segment/yolo11n-seg/weights/best.pt \
-			--conf 0.7 \
+			--det yolo11n.pt \
+			--seg ./yolo11n-seg.pt \
 			--source1 ./streams/cam_1.mp4 \
-			--source2 ./streams/cam_2.mp4 \
-			--source1 rtsp://Streamer:EFEVsaNLMY84yAW@proxy50.rt3.io:39381/Streaming/Channels/1/ \
-			--source2 rtsp://Streamer:EFEVsaNLMY84yAW@proxy50.rt3.io:39378/Streaming/Channels/1/ "
-			
-#			--source1 ./streams/cam_1.mp4 \
-#			--source2 ./streams/cam_2.mp4 "
-
+			--source2 ./streams/cam_2.mp4 "
+		
 #----------------------------------------------------------------------------------------------------------------------
 # Helper functions
 #----------------------------------------------------------------------------------------------------------------------

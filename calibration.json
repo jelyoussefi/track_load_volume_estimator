@@ -1,40 +1,64 @@
 {
+  "description": "Calibration configuration for dual camera truck load volume estimation",
+  "version": "2.1.0",
+  "timestamp": "2025-01-15T10:00:00Z",
+  
   "edge_distances": {
-    "D12": 24.6,
-    "D13": 24.75,
-    "D14": 35.0,
-    "D23": 8.15,
-    "D24": 26.15,
-    "D34": 23.55
+    "D12": 3.5,
+    "D23": 2.8,
+    "D34": 3.5,
+    "D41": 2.8,
+    "D13": 4.46,
+    "D24": 4.46
   },
-  "truck_bed_height": 1.20,
-  "truck_offset_from_p3p4": 1.0,
+  
+  "truck_bed_height": 1.2,
+  "truck_offset_from_p3p4": 0.5,
+  
   "camera1": {
-    "height": 3.6,
-    "distances": {
-      "C1": 23,
-      "C2": 10.6,
-      "C3": 4.4,
-      "C4": 21.35
-    },
+    "name": "Camera 1 - Front View",
+    "height": 3.5,
     "visible_points": ["P1", "P2"],
-    "description": "Camera 1 - Top view (P1 and P2 visible). Height is absolute from ground."
-  },
-  "camera2": {
-    "height": 3.6,
     "distances": {
-      "C1": 21.2,
-      "C2": 5.1,
-      "C3": 10,
-      "C4": 23.3
+      "C1": 5.2,
+      "C2": 5.8,
+      "C3": 7.5,
+      "C4": 8.1
     },
-    "visible_points": ["P3", "P4"],
-    "description": "Camera 2 - Bottom view (P3 and P4 visible). Height is absolute from ground."
+    "description": "Camera 1 sees points P1 and P2 (front edge of measurement zone)"
   },
-  "notes": {
-    "truck_bed_height": "Height of truck bed above ground in meters. Loads sit on this surface.",
-    "truck_offset_from_p3p4": "Distance in meters that truck stops before the P3-P4 edge.",
-    "effective_camera_height": "For volume calculations, use: camera_height - truck_bed_height",
-    "reference_plane": "P1-P2-P3-P4 plane is at ground level (z=0). Truck bed is at z=1.20m."
-  }
+  
+  "camera2": {
+    "name": "Camera 2 - Rear View",
+    "height": 3.5,
+    "visible_points": ["P3", "P4"],
+    "distances": {
+      "C1": 8.1,
+      "C2": 7.5,
+      "C3": 5.8,
+      "C4": 5.2
+    },
+    "description": "Camera 2 sees points P3 and P4 (rear edge of measurement zone)"
+  },
+  
+  "measurement_zone": {
+    "description": "The quadrilateral measurement zone defined by P1, P2, P3, P4",
+    "layout": {
+      "P1": "Top-left corner (visible in Camera 1)",
+      "P2": "Top-right corner (visible in Camera 1)",
+      "P3": "Bottom-left corner (visible in Camera 2)",
+      "P4": "Bottom-right corner (visible in Camera 2)"
+    }
+  },
+  
+  "notes": [
+    "All distances are in meters",
+    "Camera heights are measured from ground level",
+    "truck_bed_height is the height of the truck bed surface from ground",
+    "Effective camera height = camera height - truck bed height",
+    "Edge distances D12, D23, D34, D41 form the perimeter of the measurement zone",
+    "Diagonal distances D13 and D24 are used for verification",
+    "Camera distances (C1-C4) are from camera to each corner point",
+    "Update these values based on your actual installation measurements"
+  ]
 }

@@ -307,7 +307,7 @@ window.CalibrationManager = {
                 }
             }
         }
-    }
+    },
     
     startCalibration(cameraId) {
         console.log(`Starting config-based 3D calibration for camera ${cameraId}`);
@@ -956,6 +956,9 @@ window.CalibrationManager = {
         setTimeout(() => {
             const newCanvasWidth = canvas.width;
             const newCanvasHeight = canvas.height;
+            
+            const zoomedCanvasWidth = calibData.calibrationCanvasWidth || canvas.width;
+            const zoomedCanvasHeight = calibData.calibrationCanvasHeight || canvas.height;
             
             const scaleX = newCanvasWidth / zoomedCanvasWidth;
             const scaleY = newCanvasHeight / zoomedCanvasHeight;
