@@ -24,9 +24,20 @@ export DOCKER_BUILDKIT=1
 
 DOCKER_RUN_PARAMS= \
 	-it --rm -a stdout -a stderr  \
+	-e HTTP_PROXY=$(HTTP_PROXY) \
+	-e HTTPS_PROXY=$(HTTPS_PROXY) \
+	-e NO_PROXY=$(NO_PROXY) \
 	-v ${CURRENT_DIR}:/workspace \
 	-v /tmp/.X11-unix:/tmp/.X11-unix  -v ${HOME}/.Xauthority:/home/root/.Xauthority 
-	
+
+DOCKER_BUILD_PARAMS := \
+	--rm \
+	--network=host \
+	--build-arg http_proxy=$(HTTP_PROXY) \
+	--build-arg https_proxy=$(HTTPS_PROXY) \
+	--build-arg no_proxy=$(NO_PROXY) \
+	-t $(DOCKER_IMAGE_NAME) . 
+		
 ifeq ($(DEVICE),CUDA)
 	 DOCKER_RUN_PARAMS := ${DOCKER_RUN_PARAMS} --gpus all 
 else
@@ -43,7 +54,7 @@ default: run
 
 build:
 	@$(call msg, Building Docker image ${DOCKER_IMAGE_NAME} ...)
-	@docker build . -t ${DOCKER_IMAGE_NAME}
+	@docker build ${DOCKER_BUILD_PARAMS}
 
 train: build
 	@$(call msg, Training the ${MODEL_NAME} model for brick detection on ${DEVICE} ...)
